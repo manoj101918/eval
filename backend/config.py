@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     image_max_px: int = Field(default=1500, ge=100)
     jpeg_quality: int = Field(default=80, ge=1, le=95)
     pdf_render_dpi: int = Field(default=200, ge=72, le=600)
-    blank_ink_ratio: float = Field(default=0.004, ge=0, le=1)
+    blank_ink_ratio: float = Field(default=0.0001, ge=0, le=1)
 
     # Answer booklet layout
     has_cover_page: bool = True
