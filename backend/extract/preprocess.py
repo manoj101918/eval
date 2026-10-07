@@ -87,15 +87,23 @@ def ink_ratio(gray: Image.Image) -> float:
 
 
 def preprocess_page(
-    raw: RawPage, *, max_px: int, jpeg_quality: int, blank_ink_ratio: float
+    raw: RawPage,
+    *,
+    max_px: int,
+    jpeg_quality: int,
+    blank_ink_ratio: float,
+    send_max_px: int | None = None,
 ) -> PageImage:
+    """Blank detection always runs at `max_px` (its thresholds are tuned there); the JPEG
+    that is sent can be larger (`send_max_px`), e.g. for OCR."""
     small = downscale(raw.image, max_px)
     ratio = ink_ratio(small)
+    sent = small if send_max_px in (None, max_px) else downscale(raw.image, send_max_px)
     return PageImage(
         index=raw.index,
-        jpeg=to_jpeg(small, jpeg_quality),
-        width=small.width,
-        height=small.height,
+        jpeg=to_jpeg(sent, jpeg_quality),
+        width=sent.width,
+        height=sent.height,
         ink_ratio=ratio,
         blank=ratio < blank_ink_ratio,
     )

@@ -7,7 +7,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from backend.config import Settings, get_settings
+from backend.extract.clients import TranscriptionClient, make_client
 from backend.extract.ingest import RawPage, load_script
+from backend.extract.layout import script_rotation
 from backend.extract.normalize import normalize_question_label, qualify_label
 from backend.extract.orientation import detect_rotation, rotate
 from backend.extract.preprocess import PageImage, preprocess_page
@@ -19,7 +21,7 @@ from backend.extract.schemas import (
     UnassignedText,
     Usage,
 )
-from backend.extract.vision import PAGE_FAILURES, VisionAuthError, VisionClient, VisionResult
+from backend.extract.vision import PAGE_FAILURES, VisionAuthError, VisionResult
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +71,8 @@ def merge_pages(
 
 
 async def _transcribe(
-    vision: VisionClient, page: PageImage
-) -> tuple[int, VisionResult[PageTranscription] | None]:
+    vision: TranscriptionClient, page: PageImage
+) -> tuple[int, VisionResult | None]:
     page_no = page.index + 1
     try:
         return page_no, await vision.transcribe_page(page.jpeg, page_number=page_no)
@@ -82,10 +84,12 @@ async def _transcribe(
 
 
 async def _preprocess_all(raw_pages: Sequence[RawPage], s: Settings) -> list[PageImage]:
+    send_px = s.azure_image_max_px if s.transcribe_provider == "azure" else s.image_max_px
     return await asyncio.gather(
         *(
             asyncio.to_thread(preprocess_page, raw, max_px=s.image_max_px,
-                              jpeg_quality=s.jpeg_quality, blank_ink_ratio=s.blank_ink_ratio)
+                              jpeg_quality=s.jpeg_quality, blank_ink_ratio=s.blank_ink_ratio,
+                              send_max_px=send_px)
             for raw in raw_pages
         )
     )
@@ -96,10 +100,14 @@ def _rotated(raw: RawPage, degrees: int) -> RawPage:
 
 
 async def _resolve_rotation(
-    raw_pages: Sequence[RawPage], pages: Sequence[PageImage], s: Settings, vision: VisionClient
+    raw_pages: Sequence[RawPage], pages: Sequence[PageImage], s: Settings,
+    vision: TranscriptionClient,
 ) -> tuple[int, Usage]:
     """Rotation for the whole script: forced by settings, or checked once on the
-    answer page with the most ink (the clearest orientation cue)."""
+    answer page with the most ink (the clearest orientation cue). OCR services read
+    rotated pages themselves, so nothing is rotated for them."""
+    if vision.handles_rotation:
+        return 0, Usage()
     if s.page_rotation != "auto":
         return int(s.page_rotation), Usage()
     first_answer = 1 if s.has_cover_page else 0
@@ -114,10 +122,10 @@ async def extract_script(
     paths: Sequence[Path],
     *,
     settings: Settings | None = None,
-    vision: VisionClient | None = None,
+    vision: TranscriptionClient | None = None,
 ) -> ExtractionResult:
     s = settings or get_settings()
-    vision = vision or VisionClient.from_settings(s)
+    vision = vision or make_client(s)
     start = time.perf_counter()
 
     raw_pages = await asyncio.to_thread(load_script, paths, dpi=s.pdf_render_dpi)
@@ -161,10 +169,15 @@ async def extract_script(
     for _, result in transcribed:
         if result is not None:
             usage.add(result.usage)
-    answers, unassigned = merge_pages(
+    transcriptions = vision.finalize_pages(
         [(page_no, result.data if result else None) for page_no, result in transcribed]
     )
+    answers, unassigned = merge_pages(transcriptions)
     failed_pages = [page_no for page_no, result in transcribed if result is None]
+    if vision.handles_rotation:  # report what the OCR service measured
+        rotation = script_rotation(
+            [r.data.angle for _, r in transcribed if r is not None and hasattr(r.data, "angle")]
+        )
 
     elapsed = round(time.perf_counter() - start, 2)
     logger.info(

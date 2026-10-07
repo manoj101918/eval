@@ -10,7 +10,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    # Which engine transcribes pages: azure (Document Intelligence OCR) or groq (vision LLM).
+    transcribe_provider: Literal["azure", "groq"] = "azure"
+
     groq_api_key: SecretStr | None = None
+
+    # Azure Document Intelligence
+    azure_di_endpoint: str | None = None
+    azure_di_key: SecretStr | None = None
+    azure_di_model: str = "prebuilt-read"
+    # F0 (free) allows 1 analyze request/second: keep 1. S0 allows 15/second.
+    azure_max_concurrency: int = Field(default=1, ge=1)
+    azure_image_max_px: int = Field(default=2400, ge=500, le=10000)  # OCR needs more detail
+    azure_low_confidence: float = Field(default=0.5, ge=0, le=1)  # below: word flagged illegible
 
     # Vision model (Groq)
     vision_model: str = "qwen/qwen3.8-27b"

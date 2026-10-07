@@ -47,6 +47,29 @@ class CoverPageInfo(BaseModel):
     )
 
 
+class OcrWord(BaseModel):
+    text: str
+    confidence: float = Field(ge=0, le=1)
+    offset: int = Field(ge=0)
+
+
+class OcrLine(BaseModel):
+    text: str
+    polygon: list[float] = Field(min_length=8)
+    offset: int = Field(ge=0)
+    length: int = Field(ge=0)
+
+
+class OcrPage(BaseModel):
+    """One page as returned by the OCR service, validated before use."""
+
+    angle: float = Field(ge=-180, le=360)
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
+    lines: list[OcrLine]
+    words: list[OcrWord]
+
+
 class OrientationCheck(BaseModel):
     upright_tile: Literal[1, 2, 3, 4] = Field(
         description="Number of the tile in which the handwriting is upright and readable."
@@ -88,9 +111,12 @@ class UnassignedText(BaseModel):
 
 class ExtractionResult(BaseModel):
     roll_number: str | None
-    roll_number_source: Literal["qr", "vision"] | None
+    roll_number_source: Literal["qr", "vision", "ocr"] | None
     pages_total: int
-    page_rotation: int = Field(description="Degrees counter-clockwise applied to every page.")
+    page_rotation: int = Field(
+        description="Degrees counter-clockwise that make the pages upright (applied locally "
+        "for the vision model; handled by the service for OCR)."
+    )
     cover_page: int | None
     blank_pages: list[int]
     failed_pages: list[int]

@@ -4,14 +4,16 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import cv2
 import numpy as np
 from PIL import Image
 
 from backend.extract.schemas import Usage
-from backend.extract.vision import VisionClient
+
+if TYPE_CHECKING:
+    from backend.extract.clients import TranscriptionClient
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RollNumberResult:
     value: str | None
-    source: Literal["qr", "vision"] | None
+    source: Literal["qr", "vision", "ocr"] | None
     usage: Usage = field(default_factory=Usage)
 
 
@@ -56,7 +58,7 @@ async def read_roll_number(
     cover_full_res: Image.Image,
     cover_jpeg: bytes,
     *,
-    vision: VisionClient,
+    vision: "TranscriptionClient",
     pattern: str,
 ) -> RollNumberResult:
     for payload in await asyncio.to_thread(decode_qr, cover_full_res):
@@ -74,7 +76,8 @@ async def read_roll_number(
 
     value = match_roll_number(result.data.roll_number, pattern)
     if value:
-        logger.info("roll number read by vision model")
-        return RollNumberResult(value, "vision", result.usage)
+        source = getattr(vision, "roll_number_source", "vision")
+        logger.info("roll number read from cover page by %s", source)
+        return RollNumberResult(value, source, result.usage)
     logger.warning("no valid roll number found on cover page; teacher must enter it")
     return RollNumberResult(None, None, result.usage)

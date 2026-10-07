@@ -7,6 +7,7 @@ import copy
 import json
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -41,7 +42,7 @@ class VisionAuthError(VisionError):
 
 
 class DailyLimitError(VisionError):
-    """The account's per-day quota is used up. Retrying today is pointless, so remaining
+    """The account's daily/monthly quota is used up. Retrying now is pointless, so remaining
     calls fail at once (pages are reported as failed and can be rerun later)."""
 
 
@@ -118,6 +119,8 @@ def _usage_of(response: Any) -> Usage:
 
 
 class VisionClient:
+    handles_rotation = False  # pages are rotated locally (orientation check) before sending
+
     def __init__(self, client: GroqLike, settings: Settings) -> None:
         self._client = client
         self._settings = settings
@@ -149,6 +152,11 @@ class VisionClient:
         close = getattr(self._client, "close", None)
         if close is not None:
             await close()
+
+    def finalize_pages(
+        self, pages: Sequence[tuple[int, PageTranscription | None]]
+    ) -> list[tuple[int, PageTranscription | None]]:
+        return list(pages)  # the model already returns question segments
 
     async def transcribe_page(
         self, jpeg: bytes, *, page_number: int

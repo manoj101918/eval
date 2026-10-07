@@ -23,7 +23,7 @@ def script_dir(tmp_path_factory):
 
 def settings():
     return Settings(_env_file=None, vision_backoff_base_s=0, vision_backoff_max_s=0,
-                    vision_max_retries=0, page_rotation="0")
+                    vision_max_retries=0, page_rotation="0", transcribe_provider="groq")
 
 
 def factory(handler):
@@ -125,4 +125,11 @@ def test_cli_reports_daily_limit(script_dir, capsys):
     out, err = capsys.readouterr()
     assert code == 2
     assert json.loads(out)["failed_pages"] == [2]
-    assert "daily limit" in err
+    assert "usage limit was reached" in err
+
+
+def test_cli_azure_without_keys_explains(script_dir, capsys):
+    code = main([str(script_dir)], settings=Settings(_env_file=None, transcribe_provider="azure"))
+    _, err = capsys.readouterr()
+    assert code == 1
+    assert "AZURE_DI_ENDPOINT" in err

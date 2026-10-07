@@ -13,10 +13,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from backend.config import Settings, get_settings
+from backend.extract.clients import TranscriptionClient, make_client
 from backend.extract.ingest import IngestError
 from backend.extract.pipeline import extract_script
 from backend.extract.schemas import ExtractionResult
-from backend.extract.vision import VisionAuthError, VisionClient
+from backend.extract.vision import VisionAuthError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,7 +33,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def _run(paths: list[Path], settings: Settings, vision: VisionClient) -> ExtractionResult:
+async def _run(
+    paths: list[Path], settings: Settings, vision: TranscriptionClient
+) -> ExtractionResult:
     try:
         return await extract_script(paths, settings=settings, vision=vision)
     finally:
@@ -43,7 +46,7 @@ def main(
     argv: list[str] | None = None,
     *,
     settings: Settings | None = None,
-    vision_factory: Callable[[Settings], VisionClient] = VisionClient.from_settings,
+    vision_factory: Callable[[Settings], TranscriptionClient] = make_client,
 ) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
@@ -66,7 +69,9 @@ def main(
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except VisionAuthError as exc:
-        print(f"error: {exc} Set GROQ_API_KEY in .env.", file=sys.stderr)
+        keys = ("AZURE_DI_ENDPOINT and AZURE_DI_KEY" if settings.transcribe_provider == "azure"
+                else "GROQ_API_KEY")
+        print(f"error: {exc} Set {keys} in .env.", file=sys.stderr)
         return 1
     elapsed = time.perf_counter() - start
 
@@ -79,7 +84,7 @@ def main(
     )
     if vision.daily_limit_reached:
         print(
-            "note: the Groq daily limit was reached, so some pages were not sent. "
+            "note: the provider's usage limit was reached, so some pages were not sent. "
             "Rerun later, or raise the account's limits.",
             file=sys.stderr,
         )

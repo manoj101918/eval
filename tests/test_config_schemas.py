@@ -11,6 +11,8 @@ def test_settings_defaults():
     assert s.vision_reasoning_effort == "none"
     assert s.vision_response_format == "json_object"
     assert s.page_rotation == "auto"
+    assert s.transcribe_provider == "azure"
+    assert s.azure_max_concurrency == 1
     assert s.image_max_px == 1500
     assert s.has_cover_page is True
 

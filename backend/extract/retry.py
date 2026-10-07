@@ -30,8 +30,15 @@ def backoff_delay(
     return rand() * min(cap, base * (2**attempt))
 
 
+def is_rate_limit(exc: BaseException) -> bool:
+    return isinstance(exc, groq.RateLimitError) or bool(getattr(exc, "rate_limited", False))
+
+
 def retry_after(exc: BaseException) -> float | None:
     """Server-requested delay (seconds) from a `retry-after` header, if any."""
+    own = getattr(exc, "retry_after_s", None)
+    if own is not None:
+        return min(float(own), MAX_RETRY_AFTER_S)
     if not isinstance(exc, groq.APIStatusError):
         return None
     value = exc.response.headers.get("retry-after")
@@ -64,7 +71,7 @@ async def with_retries[T](
         except Exception as exc:
             if not is_retryable(exc):
                 raise
-            if rate_limit_retries is not None and isinstance(exc, groq.RateLimitError):
+            if rate_limit_retries is not None and is_rate_limit(exc):
                 if rate_limited >= rate_limit_retries:
                     raise
                 rate_limited += 1

@@ -300,3 +300,35 @@ async def test_daily_limit_keeps_finished_pages(script_dir):
     assert result.answers["1"].text == "one-a"
     assert result.failed_pages == [4, 5]
     assert len(fake.completions.calls) == 2  # page 5 was not sent after the daily limit
+
+
+async def test_azure_provider_end_to_end(script_dir):
+    from backend.extract.azure_ocr import AzureOCRClient
+    from backend.extract.ingest import load_script
+    from backend.extract.preprocess import preprocess_page
+    from tests.azure_fakes import FakeAzure, ocr_result
+
+    s = settings(transcribe_provider="azure", page_rotation="auto")
+    jpeg_to_page = {}
+    for raw in load_script([script_dir], dpi=s.pdf_render_dpi):
+        sent = preprocess_page(raw, max_px=s.image_max_px, jpeg_quality=s.jpeg_quality,
+                               blank_ink_ratio=s.blank_ink_ratio,
+                               send_max_px=s.azure_image_max_px)
+        jpeg_to_page[sent.jpeg] = raw.index + 1
+    ocr_pages = {
+        2: ocr_result([[(100.0, "31."), (220.0, "a) part a")], [(220.0, "more a")]], angle=90.0),
+        4: ocr_result([[(100.0, "(ii)"), (220.0, "roman two")],
+                       [(100.0, "32."), (220.0, "next question")]], angle=90.0),
+        5: ocr_result([[(220.0, "continues 32")]], angle=90.0),
+    }
+    fake = FakeAzure(lambda body, _i: ocr_pages[jpeg_to_page[body]])
+
+    result = await extract_script([script_dir], settings=s, vision=AzureOCRClient(fake, s))
+
+    assert result.page_rotation == 90  # measured by the service, nothing rotated locally
+    assert result.roll_number_source == "qr"
+    assert list(result.answers) == ["31a", "31aii", "32"]
+    assert result.answers["31a"].text == "part a\nmore a"
+    assert result.answers["32"].text == "next question\n\ncontinues 32"
+    assert result.answers["32"].pages == [4, 5]
+    assert len(fake.calls) == 3  # blank page 3 and the QR cover are never sent
