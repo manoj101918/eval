@@ -11,6 +11,7 @@ dependencies = [
     "groq>=1.7",
     "azure-ai-documentintelligence>=1.0",
     "aiohttp>=3.9",  # async transport for the Azure SDK
+    "openpyxl>=3.1",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "pymupdf>=1.24",
