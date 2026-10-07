@@ -25,6 +25,9 @@ DIAGRAM_SHORT_CHARS = 4  # fragments this short are labels on a drawing, not pro
 DIAGRAM_SHORT_SHARE = 0.6
 
 MAIN_MARGIN = 0.04  # main question numbers sit within this fraction of the page's left text edge
+MAIN_MARGIN_MAX = 0.13  # ...and within the left 13% of the page: on a page that starts with an
+# equation, the leftmost text is a fraction's numerator ("1" over "24"), not a question number
+UNCLEAR_MIN_CHARS = 2  # single symbols in equations ("=", ">") are not worth flagging
 
 _LETTERS = "abcdefgh"  # sub-part letters; i, v, x are read as roman numerals
 _MAIN = re.compile(
@@ -163,7 +166,7 @@ def parse_label(
     new: LabelState | None = None
 
     m = _MAIN.match(rest) if allow_main else None
-    if m:
+    if m and int(m.group(1)) > 0:  # questions are numbered from 1
         new = LabelState(main=m.group(1))
         rest = rest[m.end():]
 
@@ -202,6 +205,8 @@ def _low_confidence_words(page: OcrPage, threshold: float) -> dict[int, list[str
     for word in page.words:
         if word.confidence >= threshold:
             continue
+        if sum(c.isalnum() for c in word.text) < UNCLEAR_MIN_CHARS:
+            continue
         for line in lines:
             if line.offset <= word.offset < line.offset + line.length:
                 by_line.setdefault(line.offset, []).append(word.text)
@@ -226,7 +231,8 @@ def segment_page(page: OcrPage, state: LabelState, *, low_confidence: float) -> 
     for row in rows:
         text = row.text
         first = min(row.fragments, key=lambda f: f.x)
-        in_margin = first.x <= text_left + MAIN_MARGIN * frame_width
+        in_margin = first.x <= min(text_left + MAIN_MARGIN * frame_width,
+                                   left_edge + MAIN_MARGIN_MAX * frame_width)
         if in_margin and _BARE_NUMBER.fullmatch(first.text):
             text = f"{first.text}. {text[len(first.text):].strip()}"
         parsed = parse_label(text, state, allow_main=in_margin)

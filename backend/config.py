@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # F0 (free) allows 1 analyze request/second: keep 1. S0 allows 15/second.
     azure_max_concurrency: int = Field(default=1, ge=1)
     azure_image_max_px: int = Field(default=2400, ge=500, le=10000)  # OCR needs more detail
-    azure_low_confidence: float = Field(default=0.5, ge=0, le=1)  # below: word flagged illegible
+    azure_low_confidence: float = Field(default=0.3, ge=0, le=1)  # below: word flagged unclear
 
     # Vision model (Groq)
     vision_model: str = "qwen/qwen3.8-27b"

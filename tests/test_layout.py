@@ -167,3 +167,22 @@ def test_script_rotation(angles, expected):
 )
 def test_find_roll_number(rows, expected):
     assert find_roll_number(page(rows), r"[A-Z0-9]{5,15}") == expected
+
+
+def test_fraction_numerator_on_continuation_page_is_not_a_question():
+    """Azure splits "1/24" into a "1" row over a "24" row; with no margin label on the
+    page the "1" is the leftmost text, but it is far from the margin."""
+    eq_x = 0.18 * 2400
+    got = segments([[(eq_x, "1")], [(eq_x + 60, "= (Mg-1) (1/20 + 1/30)")], [(eq_x, "24")],
+                    [(eq_x, "The refractive index is 1.5")]])
+    assert [label for label, _ in got] == [None]
+
+
+def test_question_zero_is_not_a_label():
+    assert parse_label("0. something", LabelState()) is None
+
+
+def test_single_symbol_low_confidence_not_flagged():
+    t = segment_page(page([[(MARGIN, "5."), (BODY, "x = y")]], low_confidence={"="}),
+                     LabelState(), low_confidence=0.5)
+    assert t.segments[0].illegible is False
