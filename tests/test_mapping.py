@@ -62,10 +62,25 @@ def test_mcq_without_option_is_noted():
 def test_detailed_sub_parts_combined_under_scheme_row():
     got, unmatched = match([item("34(a)", marks=3)],
                            **{"34a": "points:", "34ai": "a, b, c", "34aiii": "d, e"})
-    assert got["34(a)"].source_keys == ["34a"]  # exact match wins over children
+    assert got["34(a)"].source_keys == ["34a", "34ai", "34aiii"]
+    assert got["34(a)"].text == "points:\n\na, b, c\n\nd, e"
     got, unmatched = match([item("34(a)", marks=3)], **{"34ai": "a, b, c", "34aiii": "d, e"})
     assert got["34(a)"].text == "a, b, c\n\nd, e"
     assert unmatched == []
+
+
+def test_more_specific_scheme_row_keeps_its_sub_part():
+    got, unmatched = match([item("34(a)", marks=2), item("34(a)(iii)", marks=1)],
+                           **{"34a": "points:", "34ai": "a, b", "34aiii": "d, e"})
+    assert got["34(a)"].source_keys == ["34a", "34ai"]
+    assert got["34(a)(iii)"].source_keys == ["34aiii"]
+    assert unmatched == []
+
+
+def test_or_alternatives_share_sub_parts():
+    got, _ = match([item("31", group="g"), item("31 OR", group="g")],
+                   **{"31a": "part a", "31b": "part b"})
+    assert got["31"].text == got["31 OR"].text == "part a\n\npart b"
 
 
 def test_children_do_not_cross_question_numbers():

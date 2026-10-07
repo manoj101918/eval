@@ -72,38 +72,45 @@ def _fill(matched: MatchedItem, keys: list[str], answers: dict[str, Answer]) -> 
 def match_answers(extraction: ExtractionResult, scheme: MarkingScheme) -> Matching:
     answers = extraction.answers
     order = list(answers)  # order of appearance in the script
-    claimed: set[str] = set()
-    results: dict[int, MatchedItem] = {}
+    position = {k: i for i, k in enumerate(order)}
+    # answer key -> student key of the scheme row(s) using it; OR alternatives share one
+    claimed: dict[str, str] = {}
+    results: dict[int, MatchedItem] = {item.row: MatchedItem(item=item) for item in scheme.items}
 
-    # Pass 1: exact keys, and MCQ answers whose option was read as a sub-part ("13d").
+    def free(key: str, student_key: str) -> bool:
+        return claimed.get(key, student_key) == student_key
+
+    # Pass 1: MCQs - the exact key, or the option read as a sub-part ("13d").
     for item in scheme.items:
-        m = MatchedItem(item=item)
-        sk = item.student_key
+        if item.qtype != "mcq":
+            continue
+        m, sk = results[item.row], item.student_key
         if sk in answers:
             _fill(m, [sk], answers)
-            claimed.add(sk)
-        elif item.qtype == "mcq":
+            claimed[sk] = sk
+        else:
             suffixed = [k for k in order if len(k) == len(sk) + 1 and k.startswith(sk)
                         and k[-1] in MCQ_OPTIONS]
             if suffixed:
                 _fill(m, suffixed[:1], answers)
-                claimed.add(suffixed[0])
+                claimed[suffixed[0]] = sk
                 m.mcq_option = suffixed[0][-1]
-        if item.qtype == "mcq" and m.mcq_option is None and m.text:
+        if m.mcq_option is None and m.text:
             m.mcq_option = mcq_option_from_text(m.text)
             if m.mcq_option is None:
                 m.notes.append("no option letter (a-e) found in the answer")
-        results[item.row] = m
 
-    # Pass 2: sub-parts written in more detail than the scheme ("34ai" for scheme "34a").
-    for item in scheme.items:
-        m = results[item.row]
-        if m.source_keys:
+    # Pass 2: other rows take their exact key plus deeper sub-parts no more specific row
+    # claims ("34a" + "34ai" + "34aiii" for scheme 34(a)); most specific rows go first.
+    for item in sorted(scheme.items, key=lambda i: len(i.student_key), reverse=True):
+        if item.qtype == "mcq":
             continue
-        children = [k for k in order if k not in claimed and _is_descendant(k, item.student_key)]
-        if children:
-            _fill(m, children, answers)
-            claimed.update(children)
+        sk = item.student_key
+        keys = [k for k in order
+                if (k == sk or _is_descendant(k, sk)) and free(k, sk)]
+        if keys:
+            _fill(results[item.row], sorted(keys, key=position.__getitem__), answers)
+            claimed.update({k: sk for k in keys})
 
     # Pass 3: sub-parts not labelled by the student ("34" written for scheme "34a", "34b").
     for item in scheme.items:
@@ -114,7 +121,7 @@ def match_answers(extraction: ExtractionResult, scheme: MarkingScheme) -> Matchi
         if ancestors:
             parent = max(ancestors, key=len)  # the closest ancestor
             _fill(m, [parent], answers)
-            claimed.add(parent)
+            claimed.setdefault(parent, item.student_key)
             m.notes.append(f"sub-part not labelled separately; graded from the answer to "
                            f"{parent}")
 
