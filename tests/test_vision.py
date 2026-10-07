@@ -7,7 +7,12 @@ import pytest
 
 from backend.config import Settings
 from backend.extract.schemas import PageTranscription
-from backend.extract.vision import InvalidOutputError, OutputRefusedError, VisionClient
+from backend.extract.vision import (
+    InvalidOutputError,
+    OutputRefusedError,
+    VisionAuthError,
+    VisionClient,
+)
 from tests.fakes import FakeAnthropic, api_error, message, scripted
 
 JPEG = b"\xff\xd8fake-jpeg"
@@ -147,3 +152,24 @@ async def test_logs_contain_no_student_text(caplog):
     await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=4)
     assert "transcribe page 4" in caplog.text
     assert SECRET_TEXT not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        api_error(anthropic.AuthenticationError, 401),
+        api_error(anthropic.PermissionDeniedError, 403),
+        TypeError("Could not resolve authentication method. Expected one of api_key..."),
+    ],
+)
+async def test_credential_errors_become_fatal_auth_error(error):
+    fake = FakeAnthropic(scripted(error))
+    with pytest.raises(VisionAuthError):
+        await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=1)
+    assert len(fake.messages.calls) == 1
+
+
+async def test_unrelated_type_error_propagates():
+    fake = FakeAnthropic(scripted(TypeError("unexpected keyword")))
+    with pytest.raises(TypeError, match="unexpected keyword"):
+        await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=1)

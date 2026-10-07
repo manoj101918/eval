@@ -30,6 +30,10 @@ class OutputRefusedError(VisionError):
     pass
 
 
+class VisionAuthError(VisionError):
+    """Credentials are missing or rejected. Fatal for the whole run, not just one page."""
+
+
 class InvalidOutputError(VisionError):
     def __init__(self, message: str, *, retryable: bool) -> None:
         super().__init__(message)
@@ -77,6 +81,11 @@ class VisionClient:
             timeout=settings.vision_call_timeout_s,
         )
         return cls(client, settings)
+
+    async def aclose(self) -> None:
+        close = getattr(self._client, "close", None)
+        if close is not None:
+            await close()
 
     async def transcribe_page(
         self, jpeg: bytes, *, page_number: int
@@ -140,9 +149,17 @@ class VisionClient:
         async def attempt() -> T:
             nonlocal invalid_outputs
             async with self._semaphore:  # held only while the request is in flight
-                response = await asyncio.wait_for(
-                    self._client.messages.create(**request), timeout=s.vision_call_timeout_s
-                )
+                try:
+                    response = await asyncio.wait_for(
+                        self._client.messages.create(**request), timeout=s.vision_call_timeout_s
+                    )
+                except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
+                    raise VisionAuthError("The Anthropic API rejected the credentials.") from exc
+                except TypeError as exc:
+                    # The SDK raises a plain TypeError when no credentials are configured.
+                    if "authentication" not in str(exc).lower():
+                        raise
+                    raise VisionAuthError("No Anthropic API credentials are configured.") from exc
             usage.add(_usage_of(response))
             try:
                 return _validate(response, output_model)

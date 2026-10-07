@@ -1,4 +1,9 @@
-"""Synthetic answer-booklet pages for tests (A4 at 200 dpi, grayscale)."""
+"""Synthetic answer-booklet pages for tests (A4 at 200 dpi, grayscale).
+
+Factories are cached (pages are slow to generate); callers must not mutate the images.
+"""
+
+from functools import cache
 
 import cv2
 import numpy as np
@@ -37,23 +42,28 @@ def _write(a: np.ndarray, lines: int, word: str = "Newton law", words: int = 6) 
     return a.astype(np.float32)
 
 
+@cache
 def blank_page() -> Image.Image:
     return _to_image(_paper())
 
 
+@cache
 def ruled_blank_page() -> Image.Image:
     return _to_image(_rule(_paper()))
 
 
+@cache
 def written_page(lines: int = 30) -> Image.Image:
     return _to_image(_write(_rule(_paper()), lines))
 
 
+@cache
 def short_answer_page() -> Image.Image:
     """A ruled page with only '42' written on it — must NOT count as blank."""
     return _to_image(_write(_rule(_paper()), 1, word="42", words=1))
 
 
+@cache
 def cover_page(qr_payload: str | None = None) -> Image.Image:
     a = _paper().clip(0, 255).astype(np.uint8)
     cv2.putText(a, "ANSWER BOOKLET", (450, 250), cv2.FONT_HERSHEY_SIMPLEX, 2.5, 20, 5)
