@@ -332,3 +332,17 @@ async def test_azure_provider_end_to_end(script_dir):
     assert result.answers["32"].text == "next question\n\ncontinues 32"
     assert result.answers["32"].pages == [4, 5]
     assert len(fake.calls) == 3  # blank page 3 and the QR cover are never sent
+
+
+def test_merge_flags_label_reappearing_after_other_answers():
+    answers, _ = merge_pages(
+        [(2, page(seg("1", "mcq one"), seg("2", "mcq two"))),
+         (3, page(seg("1", "numbered point inside another answer")))]
+    )
+    assert answers["1"].review_notes == ["label seen again on page 3 after other answers"]
+    assert answers["2"].review_notes == []
+
+
+def test_merge_same_label_continuing_is_not_flagged():
+    answers, _ = merge_pages([(2, page(seg("5", "start"))), (3, page(seg("5", "continued")))])
+    assert answers["5"].review_notes == []

@@ -52,13 +52,17 @@ def merge_pages(
                                    illegible=seg.illegible)
                 )
                 continue
-            current = key
+            previous, current = current, key
             notes = [f"p{page_no}: {n}" for n in seg.illegible_notes]
             answer = answers.get(key)
             if answer is None:
                 answers[key] = Answer(text=seg.text, pages=[page_no], has_diagram=seg.has_diagram,
                                       illegible=seg.illegible, illegible_notes=notes)
                 continue
+            if label and key != previous:  # rare in real scripts; often a misread label
+                answer.review_notes.append(
+                    f"label seen again on page {page_no} after other answers"
+                )
             if seg.text:
                 answer.text = f"{answer.text}\n\n{seg.text}" if answer.text else seg.text
             if page_no not in answer.pages:

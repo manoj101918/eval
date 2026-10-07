@@ -1,36 +1,34 @@
-# AI Answer Script Evaluator
-Grades handwritten college answer scripts (weekly tests, mids, semester exams) with a vision LLM. A teacher reviews every mark before it is final, and approved marks sync to the college Excel sheet.
-
-## Stack
-- Backend: Python 3.12, FastAPI, SQLAlchemy, Alembic, PostgreSQL
-- Jobs: Redis + arq for background processing
-- AI: Groq API (`qwen/qwen3.8-27b` vision model for transcription; grading model chosen in Phase 2)
-- Frontend: Next.js + TypeScript + Tailwind
-- Excel: openpyxl
-- Deploy: Docker Compose
-
-## Hard rules
-- No mark is ever written to Excel without teacher approval.
-- Every AI output is validated against a Pydantic schema.
-- All API calls are async, with concurrency limits, retries and timeouts.
-- Student data never goes in logs. Secrets only in .env.
-- Every feature gets tests. Run tests before saying a phase is done.
-
-## Workflow
-- Before coding a phase, show me a plan and wait for my approval.
-- Commit after each working step with a clear message.
-- At the end of each phase, update the "Progress" section below.
-
+# AI Answer Script Evaluator
+Grades handwritten college answer scripts (weekly tests, mids, semester exams) with a vision LLM. A teacher reviews every mark before it is final, and approved marks sync to the college Excel sheet.
+
+## Stack
+- Backend: Python 3.12, FastAPI, SQLAlchemy, Alembic, PostgreSQL
+- Jobs: Redis + arq for background processing
+- AI / OCR: Azure Document Intelligence `prebuilt-read` for transcription (default); Groq `qwen/qwen3.8-27b` vision model selectable with `TRANSCRIBE_PROVIDER=groq`; grading model chosen in Phase 2
+- Frontend: Next.js + TypeScript + Tailwind
+- Excel: openpyxl
+- Deploy: Docker Compose
+
+## Hard rules
+- No mark is ever written to Excel without teacher approval.
+- Every AI output is validated against a Pydantic schema.
+- All API calls are async, with concurrency limits, retries and timeouts.
+- Student data never goes in logs. Secrets only in .env.
+- Every feature gets tests. Run tests before saying a phase is done.
+
+## Workflow
+- Before coding a phase, show me a plan and wait for my approval.
+- Commit after each working step with a clear message.
+- At the end of each phase, update the "Progress" section below.
+
 ## Progress
 ### Phase 1 — Ingestion & extraction (branch `phase-1-extraction`)
-Code done, 176 tests passing (all mocked, no network). Live run on the sample only partly succeeded (Groq free-tier limits); see below.
-- `backend/extract/`: `ingest` (PDF via PyMuPDF / images / image dir), `preprocess` (grayscale, max 1500px, JPEG, blank detection by ink ratio after removing ruling lines), `roll_number` (OpenCV QR on full-res cover, vision fallback, regex-validated), `vision` (AsyncGroq, semaphore, per-call timeout, shared pause on 429, JSON-object output validated by Pydantic; reasoning off), `orientation` (one vision check per script on a 2x2 mosaic of the four rotations), `retry` (exp. backoff + jitter, retry-after), `pipeline` (merges page segments into answers by normalised question number).
-- CLI: `python -m backend.extract <pdf|images|dir> [--pretty] [--concurrency N]`; offline tuning: `python -m backend.extract.inspect <script>`.
-- Page 1 is treated as the cover (roll number only, never transcribed); `HAS_COVER_PAGE=false` to change.
-- Switched from Anthropic to Groq (user decision); Anthropic SDK removed.
-- Sample: `samples/script1.pdf` = public CBSE 2023 Class 12 Physics topper sheet (29 pages, git-ignored).
-- Live findings (Groq `qwen/qwen3.8-27b`): strict `json_schema` returns empty transcriptions with reasoning off, so `json_object` is the default; the sample is scanned sideways (needs 90� CCW), which motivated auto-rotation; free tier = 8,000 tokens/min (~2-3 pages/min).
-- Live runs (2026-10-07): rotation detected correctly (90�); successful pages give sensible keys (34, 35a, 26bi, 23a across pages 23-25, MCQs 1-14). Groq free tier for qwen3.8-27b = 8K tokens/min and 200K tokens/day: ~3K tokens/page means ~60 pages/day; the second run hit the daily cap (11 pages failed). Laptop standby also stalled runs (ConnectError bursts).
-- Rate handling: client-side TPM pacing, shared pause on 429/connection errors, separate 429 retry budget, daily-limit detection (remaining pages skipped, reported as failed).
-- OCR comparison (`python -m experiments.ocr_compare`, 3 sample pages vs hand reference): Groq vision 98% word recall, keeps equations/symbols, but duplicated one page and invented one equation line; Azure Document Intelligence (read) 92% words, ~4 s/page, verbatim prose but equations, fractions and diagrams garbled, no question structure; EasyOCR 9% words (unusable for handwriting).
-- Open items: decide on Groq paid tier / provider for real volumes; rerun only failed pages; tune `BLANK_INK_RATIO` on booklets that have blank pages; per-page orientation if scripts mix orientations; roll number on the sample is masked (CBSE), so the vision fallback correctly returns null.
+Code done, 240 tests passing (all mocked, no network). Live: 29-page sample transcribed with Azure, 28/28 answer pages OK, ~4.5-5 min on the free F0 tier.
+- `backend/extract/`: `ingest` (PDF via PyMuPDF / images / image dir), `preprocess` (grayscale; blank detection at 1500px by ink ratio after removing ruling lines; JPEG sent at 2400px for OCR, 1500px for Groq), `roll_number` (OpenCV QR on full-res cover, then cover text: OCR "Roll No" field or vision model), `azure_ocr` (async Azure SDK, SDK retries off; our retry/backoff/timeout/semaphore; shared pause on 429/connection errors; quota detection; OcrPage Pydantic validation), `layout` (rows rebuilt in the page's reading frame, rule-based question labels with state carried across pages, diagram/equation-fragment and unclear-word flags), `vision` + `orientation` (Groq path: JSON-object output, 2x2 rotation mosaic check, TPM pacing), `clients` (provider switch), `pipeline` (merge into answers by normalised question number; `review_notes` when a label reappears after other answers).
+- CLI: `python -m backend.extract <pdf|images|dir> [--pretty] [--concurrency N]`; offline tuning: `python -m backend.extract.inspect <script>`; engine comparison: `python -m experiments.ocr_compare`.
+- Page 1 is the cover (roll number only, never transcribed); `HAS_COVER_PAGE=false` to change.
+- Provider history: Anthropic -> Groq -> Azure (user decisions). Groq free tier (8K tokens/min, 200K/day ≈ 60 pages/day) was too slow; laptop standby also stalled runs.
+- Sample: `samples/script1.pdf` = public CBSE 2023 Class 12 Physics topper sheet (29 pages, scanned sideways, roll number masked; git-ignored).
+- OCR comparison on 3 pages vs hand reference: Groq vision 98% word recall, keeps equations, but duplicated a page and invented an equation line; Azure 92% words, verbatim prose, equations/fractions/diagrams garbled; EasyOCR 9% (unusable).
+- Known Azure limits: equations garbled (teacher must check maths/physics); diagrams only flagged; rule-based labels can misfire (numbered points or misreads like "i)"->"1)" become keys; MCQ answers "13. (d)" become key "13d" until Phase 2 maps keys to the question paper); F0 = 500 pages/month, 1 request/second.
+- Open items: map answer keys to the question paper/rubric (Phase 2); rerun only failed pages; S0 tier + higher AZURE_MAX_CONCURRENCY for real volumes; tune `BLANK_INK_RATIO` on booklets with blank pages; optional hybrid (OCR text checked by an LLM) for equation-heavy subjects.

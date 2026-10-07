@@ -98,6 +98,9 @@ class Answer(BaseModel):
     has_diagram: bool = False
     illegible: bool = False
     illegible_notes: list[str] = Field(default_factory=list)
+    # Why a teacher should look closely, e.g. a question label that reappears after other
+    # answers (often a misread label merging unrelated text under one question).
+    review_notes: list[str] = Field(default_factory=list)
 
 
 class UnassignedText(BaseModel):
