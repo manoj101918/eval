@@ -113,3 +113,16 @@ def test_cli_auth_error_exit_1(script_dir, capsys):
     assert code == 1
     assert out == ""
     assert "GROQ_API_KEY" in err
+
+
+
+def test_cli_reports_daily_limit(script_dir, capsys):
+    from tests.fakes import TPD_MESSAGE
+
+    code = main([str(script_dir)], settings=settings(),
+                vision_factory=factory(lambda r: api_error(groq.RateLimitError, 429,
+                                                           message=TPD_MESSAGE)))
+    out, err = capsys.readouterr()
+    assert code == 2
+    assert json.loads(out)["failed_pages"] == [2]
+    assert "daily limit" in err

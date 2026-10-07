@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     vision_tokens_per_minute: int = Field(default=8000, ge=0)
     vision_backoff_base_s: float = Field(default=1.0, ge=0)
     vision_backoff_max_s: float = Field(default=30.0, ge=0)
-    vision_max_tokens: int = Field(default=4096, ge=256, le=16384)
+    vision_max_tokens: int = Field(default=2048, ge=256, le=16384)
 
     # Image preprocessing
     image_max_px: int = Field(default=1500, ge=100)

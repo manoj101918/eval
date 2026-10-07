@@ -10,12 +10,23 @@ from pydantic import SecretStr
 from backend.config import Settings
 from backend.extract.schemas import CoverPageInfo, PageTranscription
 from backend.extract.vision import (
+    DailyLimitError,
     InvalidOutputError,
     VisionAuthError,
     VisionClient,
+    rate_limit_kind,
     strict_json_schema,
 )
-from tests.fakes import FakeGroq, api_error, connection_error, message, scripted, user_text
+from tests.fakes import (
+    TPD_MESSAGE,
+    TPM_MESSAGE,
+    FakeGroq,
+    api_error,
+    connection_error,
+    message,
+    scripted,
+    user_text,
+)
 
 JPEG = b"\xff\xd8fake-jpeg"
 SECRET_TEXT = "Photosynthesis converts light energy"
@@ -70,7 +81,7 @@ async def test_transcribe_page_success():
     request = fake.completions.calls[0]
     assert request["model"] == "qwen/qwen3.8-27b"
     assert request["reasoning_effort"] == "none"
-    assert request["max_completion_tokens"] == 4096
+    assert request["max_completion_tokens"] == 2048
     system, user = request["messages"]
     assert system["role"] == "system" and "transcribe" in system["content"]
     assert '"segments"' in system["content"]  # json_object mode: schema is in the prompt
@@ -283,3 +294,32 @@ async def test_token_pacing_spaces_requests(monkeypatch):
     await asyncio.gather(client.transcribe_page(JPEG, page_number=1),
                          client.transcribe_page(JPEG, page_number=2))
     assert times[1] - times[0] >= 0.25
+
+
+
+def test_rate_limit_kind():
+    assert rate_limit_kind(api_error(groq.RateLimitError, 429, message=TPD_MESSAGE)) == "TPD"
+    assert rate_limit_kind(api_error(groq.RateLimitError, 429, message=TPM_MESSAGE)) == "TPM"
+    assert rate_limit_kind(api_error(groq.RateLimitError, 429)) is None
+
+
+async def test_daily_limit_fails_fast_and_skips_later_calls(caplog):
+    fake = FakeGroq(scripted(api_error(groq.RateLimitError, 429, {"retry-after": "3600"},
+                                       message=TPD_MESSAGE)))
+    client = VisionClient(fake, settings())
+    with pytest.raises(DailyLimitError):
+        await client.transcribe_page(JPEG, page_number=1)
+    assert client.daily_limit_reached is True
+    with pytest.raises(DailyLimitError):
+        await client.transcribe_page(JPEG, page_number=2)
+    assert len(fake.completions.calls) == 1  # the second page was never sent
+    assert "org_test" not in caplog.text
+
+
+async def test_minute_limit_is_still_retried():
+    fake = FakeGroq(scripted(api_error(groq.RateLimitError, 429, {"retry-after": "0"},
+                                       message=TPM_MESSAGE), message(PAGE)))
+    client = VisionClient(fake, settings())
+    result = await client.transcribe_page(JPEG, page_number=1)
+    assert result.data.segments
+    assert client.daily_limit_reached is False

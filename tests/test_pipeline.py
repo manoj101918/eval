@@ -11,7 +11,14 @@ from backend.extract.pipeline import extract_script, merge_pages
 from backend.extract.schemas import PageSegment, PageTranscription
 from backend.extract.vision import VisionAuthError, VisionClient
 from tests import pages
-from tests.fakes import FakeGroq, api_error, is_orientation_check, message, page_number_of
+from tests.fakes import (
+    TPD_MESSAGE,
+    FakeGroq,
+    api_error,
+    is_orientation_check,
+    message,
+    page_number_of,
+)
 
 ROLL = "21CS045"
 
@@ -278,3 +285,18 @@ async def test_forced_rotation_skips_check(script_dir):
     result = await run(script_dir, fake, page_rotation="180")
     assert result.page_rotation == 180
     assert not any(is_orientation_check(c) for c in fake.completions.calls)
+
+
+
+async def test_daily_limit_keeps_finished_pages(script_dir):
+    def handler(request):
+        n = page_number_of(request)
+        if n == 2:
+            return message(TRANSCRIPTS[2])
+        return api_error(groq.RateLimitError, 429, message=TPD_MESSAGE)
+
+    fake = FakeGroq(handler, delay=lambda r: 0 if page_number_of(r) == 2 else 0.05)
+    result = await run(script_dir, fake, vision_max_concurrency=1)
+    assert result.answers["1"].text == "one-a"
+    assert result.failed_pages == [4, 5]
+    assert len(fake.completions.calls) == 2  # page 5 was not sent after the daily limit

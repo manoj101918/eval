@@ -6,6 +6,7 @@ import base64
 import copy
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -26,6 +27,7 @@ DEFAULT_INPUT_ESTIMATE = 3000  # tokens for one page image + prompt, until measu
 EXPECTED_OUTPUT_TOKENS = 600
 ORIENTATION_MAX_TOKENS = 64
 MAX_INVALID_OUTPUT_RETRIES = 1
+DAILY_LIMITS = {"RPD", "TPD", "ASD"}
 
 
 class VisionError(Exception):
@@ -38,10 +40,24 @@ class VisionAuthError(VisionError):
     """Credentials are missing or rejected. Fatal for the whole run, not just one page."""
 
 
+class DailyLimitError(VisionError):
+    """The account's per-day quota is used up. Retrying today is pointless, so remaining
+    calls fail at once (pages are reported as failed and can be rerun later)."""
+
+
 class InvalidOutputError(VisionError):
     def __init__(self, message: str, *, retryable: bool) -> None:
         super().__init__(message)
         self.retryable = retryable
+
+
+_LIMIT_KIND = re.compile(r"\((RPM|RPD|TPM|TPD|ASH|ASD)\)")
+
+
+def rate_limit_kind(exc: groq.RateLimitError) -> str | None:
+    """Which limit a 429 refers to, e.g. 'TPM' or 'TPD', parsed from Groq's message."""
+    m = _LIMIT_KIND.search(str(exc))
+    return m.group(1) if m else None
 
 
 # Failures that end one vision task (a page) after retries; anything else is a bug.
@@ -116,6 +132,7 @@ class VisionClient:
             else None
         )
         self._input_estimates: dict[str, int] = {}
+        self.daily_limit_reached = False
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "VisionClient":
@@ -227,6 +244,8 @@ class VisionClient:
         async def attempt() -> T:
             nonlocal invalid_outputs
             async with self._semaphore:  # held only while the request is in flight
+                if self.daily_limit_reached:
+                    raise DailyLimitError("Groq daily limit reached; call not sent.")
                 await self._pause_if_needed()
                 reservation = None
                 if self._limiter is not None:
@@ -242,6 +261,13 @@ class VisionClient:
                 except (groq.AuthenticationError, groq.PermissionDeniedError) as exc:
                     raise VisionAuthError("The Groq API rejected the API key.") from exc
                 except groq.RateLimitError as exc:
+                    limit = rate_limit_kind(exc)
+                    if limit in DAILY_LIMITS:
+                        self.daily_limit_reached = True
+                        logger.error("Groq daily limit (%s) reached; remaining calls skipped",
+                                     limit)
+                        raise DailyLimitError(f"Groq daily limit ({limit}) reached.") from None
+                    logger.info("rate limited (%s)", limit or "unknown limit")
                     self._pause_all(max(retry_after(exc) or 0.0, RATE_LIMIT_MIN_PAUSE_S))
                     raise
                 except groq.APIConnectionError:

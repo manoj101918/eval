@@ -60,7 +60,8 @@ def main(
 
     start = time.perf_counter()
     try:
-        result = asyncio.run(_run(args.paths, settings, vision_factory(settings)))
+        vision = vision_factory(settings)
+        result = asyncio.run(_run(args.paths, settings, vision))
     except IngestError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -76,6 +77,12 @@ def main(
         f"{result.usage.api_calls} API calls)",
         file=sys.stderr,
     )
+    if vision.daily_limit_reached:
+        print(
+            "note: the Groq daily limit was reached, so some pages were not sent. "
+            "Rerun later, or raise the account's limits.",
+            file=sys.stderr,
+        )
     return 2 if result.failed_pages else 0
 
 

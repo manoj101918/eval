@@ -46,10 +46,23 @@ def message(
     )
 
 
-def api_error(cls: type[groq.APIStatusError], status: int, headers: dict | None = None):
+def api_error(
+    cls: type[groq.APIStatusError], status: int, headers: dict | None = None,
+    message: str = "error",
+):
     request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
     response = httpx.Response(status, request=request, headers=headers or {})
-    return cls("error", response=response, body=None)
+    return cls(message, response=response, body=None)
+
+
+TPD_MESSAGE = (
+    "Error code: 429 - Rate limit reached for model `qwen/qwen3.8-27b` in organization "
+    "`org_test` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 199000"
+)
+TPM_MESSAGE = (
+    "Error code: 429 - Rate limit reached for model `qwen/qwen3.8-27b` in organization "
+    "`org_test` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 7000"
+)
 
 
 def connection_error() -> groq.APIConnectionError:
