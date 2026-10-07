@@ -22,4 +22,9 @@ Grades handwritten college answer scripts (weekly tests, mids, semester exams) w
 - At the end of each phase, update the "Progress" section below.
 
 ## Progress
-(empty)
+### Phase 1 — Ingestion & extraction (branch `phase-1-extraction`)
+Done, 127 tests passing (all mocked, no network). Live run on a real scan still pending.
+- `backend/extract/`: `ingest` (PDF via PyMuPDF / images / image dir), `preprocess` (grayscale, max 1500px, JPEG, blank detection by ink ratio after removing ruling lines), `roll_number` (OpenCV QR on full-res cover, vision fallback, regex-validated), `vision` (AsyncAnthropic, semaphore, per-call timeout, JSON-schema output validated by Pydantic), `retry` (exp. backoff + jitter, retry-after), `pipeline` (merges page segments into answers by normalised question number).
+- CLI: `python -m backend.extract <pdf|images|dir> [--pretty] [--concurrency N]`; offline tuning: `python -m backend.extract.inspect <script>`.
+- Page 1 is treated as the cover (roll number only, never transcribed); `HAS_COVER_PAGE=false` to change.
+- Open items: tune `BLANK_INK_RATIO` on real booklets; Haiku 4.5 needs a 4096-token prefix to cache, so the transcription prompt is not cached yet (caching pays off in grading).
