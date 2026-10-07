@@ -1,26 +1,26 @@
-# AI Answer Script Evaluator
-Grades handwritten college answer scripts (weekly tests, mids, semester exams) with a vision LLM. A teacher reviews every mark before it is final, and approved marks sync to the college Excel sheet.
-
-## Stack
-- Backend: Python 3.12, FastAPI, SQLAlchemy, Alembic, PostgreSQL
-- Jobs: Redis + arq for background processing
-- AI / OCR: Azure Document Intelligence `prebuilt-read` for transcription (default); Groq `qwen/qwen3.8-27b` vision model selectable with `TRANSCRIBE_PROVIDER=groq`; grading model chosen in Phase 2
-- Frontend: Next.js + TypeScript + Tailwind
-- Excel: openpyxl
-- Deploy: Docker Compose
-
-## Hard rules
-- No mark is ever written to Excel without teacher approval.
-- Every AI output is validated against a Pydantic schema.
-- All API calls are async, with concurrency limits, retries and timeouts.
-- Student data never goes in logs. Secrets only in .env.
-- Every feature gets tests. Run tests before saying a phase is done.
-
-## Workflow
-- Before coding a phase, show me a plan and wait for my approval.
-- Commit after each working step with a clear message.
-- At the end of each phase, update the "Progress" section below.
-
+# AI Answer Script Evaluator
+Grades handwritten college answer scripts (weekly tests, mids, semester exams) with a vision LLM. A teacher reviews every mark before it is final, and approved marks sync to the college Excel sheet.
+
+## Stack
+- Backend: Python 3.12, FastAPI, SQLAlchemy, Alembic, PostgreSQL
+- Jobs: Redis + arq for background processing
+- AI / OCR: Azure Document Intelligence `prebuilt-read` for transcription (default); Groq `qwen/qwen3.8-27b` vision model selectable with `TRANSCRIBE_PROVIDER=groq`; grading model chosen in Phase 2
+- Frontend: Next.js + TypeScript + Tailwind
+- Excel: openpyxl
+- Deploy: Docker Compose
+
+## Hard rules
+- No mark is ever written to Excel without teacher approval.
+- Every AI output is validated against a Pydantic schema.
+- All API calls are async, with concurrency limits, retries and timeouts.
+- Student data never goes in logs. Secrets only in .env.
+- Every feature gets tests. Run tests before saying a phase is done.
+
+## Workflow
+- Before coding a phase, show me a plan and wait for my approval.
+- Commit after each working step with a clear message.
+- At the end of each phase, update the "Progress" section below.
+
 ## Progress
 ### Phase 1 — Ingestion & extraction (branch `phase-1-extraction`)
 Code done, 240 tests passing (all mocked, no network). Live: 29-page sample transcribed with Azure, 28/28 answer pages OK, ~4.5-5 min on the free F0 tier.
@@ -31,4 +31,14 @@ Code done, 240 tests passing (all mocked, no network). Live: 29-page sample tran
 - Sample: `samples/script1.pdf` = public CBSE 2023 Class 12 Physics topper sheet (29 pages, scanned sideways, roll number masked; git-ignored).
 - OCR comparison on 3 pages vs hand reference: Groq vision 98% word recall, keeps equations, but duplicated a page and invented an equation line; Azure 92% words, verbatim prose, equations/fractions/diagrams garbled; EasyOCR 9% (unusable).
 - Known Azure limits: equations garbled (teacher must check maths/physics); diagrams only flagged; rule-based labels can misfire (numbered points or misreads like "i)"->"1)" become keys; MCQ answers "13. (d)" become key "13d" until Phase 2 maps keys to the question paper); F0 = 500 pages/month, 1 request/second.
-- Open items: map answer keys to the question paper/rubric (Phase 2); rerun only failed pages; S0 tier + higher AZURE_MAX_CONCURRENCY for real volumes; tune `BLANK_INK_RATIO` on booklets with blank pages; optional hybrid (OCR text checked by an LLM) for equation-heavy subjects.
+- Open items: rerun only failed pages; S0 tier + higher AZURE_MAX_CONCURRENCY for real volumes; tune `BLANK_INK_RATIO` on booklets with blank pages; optional hybrid (OCR text checked by an LLM) for equation-heavy subjects.
+
+### Phase 2 — Grading against an Excel marking scheme (branch `phase-2-grading`)
+Done, 311 tests passing (all mocked). Live: 5-question reference scheme on the sample graded in ~1 min, ~8K Groq tokens.
+- `backend/llm/groq_chat.py`: shared Groq JSON client (concurrency, token pacing, shared pauses, daily limit, retries, Pydantic validation) used by transcription and grading.
+- `backend/grading/`: `scheme` (Excel import, columns by header name, row-level errors; OR groups), `template` (`python -m backend.grading.template scheme.xlsx`), `mapping` (answer keys -> scheme rows: exact, MCQ "13d"/"(c)", sub-parts combined, unlabelled sub-parts from the parent, OR alternatives), `grader` (MCQs by rule; others by Groq `openai/gpt-oss-120b`, strict JSON, reasoning medium, temperature 0.2; marks range-checked, retried once, never clamped; answer fenced against prompt injection; OR group counts the better alternative), `__main__` CLI (`python -m backend.grading --scheme s.xlsx --script result.json | scan`, `-o` for UTF-8 file output).
+- Output is always status "proposed"; nothing is written to the college Excel (later phase, after teacher approval).
+- needs_review: low confidence, OCR problem, diagram/equation fragments, unclear words, carried review notes, or any deduction made with less than high confidence (live run: OCR read "i"/"j" as "c"/";" and the model deducted 2 marks on 34(a) without flagging it).
+- Live findings: reference scheme (`samples/reference_scheme.xlsx`, written for testing, not CBSE's official scheme) gave 8.5-9/11 across two runs; marks vary between runs on OCR-damaged answers (Q19 2 -> 1.5), so flagged deductions matter. Review flags are frequent because most answers carry unclear-word/equation notes.
+- Free tier: gpt-oss-120b 8K tokens/min, 200K/day; ~1.5K tokens per written question.
+- Open items: teacher review + DB/API (Phase 3), college Excel sync of approved marks (later); official marking scheme for a real exam to measure agreement with teacher marks; reduce noisy review flags.
