@@ -22,13 +22,17 @@ from backend.extract.normalize import normalize_question_label, qualify_label
         ("2.ii", "2ii"),
         ("  7)  ", "7"),
         ("IV", "iv"),
+        ("31 (1)", "31.1"),  # not question 311
+        ("31. a) (i)", "31ai"),
+        ("Q 4.2", "4.2"),
+        ("3 1", "3.1"),
     ],
 )
 def test_normalize(label, expected):
     assert normalize_question_label(label) == expected
 
 
-@pytest.mark.parametrize("label", [None, "", "   ", "Q", "Q.", "()"])
+@pytest.mark.parametrize("label", [None, "", "   ", "Q", "Q.", "()", "SECTION-A", "Section B"])
 def test_normalize_empty(label):
     assert normalize_question_label(label) is None
 

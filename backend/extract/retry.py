@@ -48,25 +48,41 @@ async def with_retries[T](
     base: float,
     cap: float,
     label: str = "call",
+    rate_limit_retries: int | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> T:
     """Run `fn`, retrying retryable failures up to `retries` times.
 
+    Rate-limit errors (429) count against `rate_limit_retries` instead, when given.
     `label` is logged; it must never contain student data.
     """
     attempt = 0
+    rate_limited = 0
     while True:
         try:
             return await fn()
         except Exception as exc:
-            if attempt >= retries or not is_retryable(exc):
+            if not is_retryable(exc):
                 raise
-            delay = retry_after(exc)
-            if delay is None:
-                delay = backoff_delay(attempt, base=base, cap=cap)
-            attempt += 1
+            if rate_limit_retries is not None and isinstance(exc, groq.RateLimitError):
+                if rate_limited >= rate_limit_retries:
+                    raise
+                rate_limited += 1
+                count, budget = rate_limited, rate_limit_retries
+                delay = retry_after(exc)
+                if delay is None:
+                    delay = backoff_delay(rate_limited - 1, base=base, cap=cap)
+            else:
+                if attempt >= retries:
+                    raise
+                delay = retry_after(exc)
+                if delay is None:
+                    delay = backoff_delay(attempt, base=base, cap=cap)
+                attempt += 1
+                count, budget = attempt, retries
+            cause = f" ({type(exc.__cause__).__name__})" if exc.__cause__ else ""
             logger.warning(
-                "%s failed with %s; retry %d/%d in %.1fs",
-                label, type(exc).__name__, attempt, retries, delay,
+                "%s failed with %s%s; retry %d/%d in %.1fs",
+                label, type(exc).__name__, cause, count, budget, delay,
             )
             await sleep(delay)

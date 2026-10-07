@@ -105,3 +105,28 @@ async def test_zero_retries():
     with pytest.raises(TimeoutError):
         await with_retries(fn, retries=0, base=0, cap=0, sleep=Recorder())
     assert calls["n"] == 1
+
+
+async def test_rate_limits_use_their_own_budget():
+    failures = [api_error(groq.RateLimitError, 429)] * 6 + [TimeoutError()]
+    fn, calls = flaky(failures)
+    result = await with_retries(fn, retries=1, base=0, cap=0, rate_limit_retries=6,
+                                sleep=Recorder())
+    assert result == "ok"
+    assert calls["n"] == 8  # 6 rate limits + 1 timeout + success
+
+
+async def test_rate_limit_budget_exhausted():
+    fn, calls = flaky([api_error(groq.RateLimitError, 429)] * 5)
+    with pytest.raises(groq.RateLimitError):
+        await with_retries(fn, retries=10, base=0, cap=0, rate_limit_retries=2,
+                           sleep=Recorder())
+    assert calls["n"] == 3
+
+
+async def test_retry_log_names_underlying_cause(caplog):
+    err = connection_error()
+    err.__cause__ = ConnectionResetError()
+    fn, _ = flaky([err])
+    await with_retries(fn, retries=1, base=0, cap=0, sleep=Recorder())
+    assert "APIConnectionError (ConnectionResetError)" in caplog.text

@@ -14,12 +14,16 @@ from pydantic import BaseModel, ValidationError
 
 from backend.config import Settings
 from backend.extract import prompts
-from backend.extract.retry import retry_after, with_retries
+from backend.extract.ratelimit import TokenRateLimiter
+from backend.extract.retry import backoff_delay, retry_after, with_retries
 from backend.extract.schemas import CoverPageInfo, OrientationCheck, PageTranscription, Usage
 
 logger = logging.getLogger(__name__)
 
 COVER_MAX_TOKENS = 256
+RATE_LIMIT_MIN_PAUSE_S = 5.0  # Groq's retry-after is sometimes 1s when the window needs longer
+DEFAULT_INPUT_ESTIMATE = 3000  # tokens for one page image + prompt, until measured
+EXPECTED_OUTPUT_TOKENS = 600
 ORIENTATION_MAX_TOKENS = 64
 MAX_INVALID_OUTPUT_RETRIES = 1
 
@@ -102,9 +106,16 @@ class VisionClient:
         self._client = client
         self._settings = settings
         self._semaphore = asyncio.Semaphore(settings.vision_max_concurrency)
-        # When the API rate-limits one call, every call pauses until this loop time, so
-        # queued requests do not all hit the limit again at once.
+        # After a 429 or a connection failure every call pauses until this loop time, so
+        # queued requests do not all fail again at once (and burn their retries).
         self._resume_at = 0.0
+        self._connection_failures = 0
+        self._limiter = (
+            TokenRateLimiter(settings.vision_tokens_per_minute)
+            if settings.vision_tokens_per_minute
+            else None
+        )
+        self._input_estimates: dict[str, int] = {}
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "VisionClient":
@@ -144,10 +155,14 @@ class VisionClient:
             label="orientation check",
         )
 
-    async def _pause_if_rate_limited(self) -> None:
+    async def _pause_if_needed(self) -> None:
         delay = self._resume_at - asyncio.get_running_loop().time()
         if delay > 0:
             await asyncio.sleep(delay)
+
+    def _pause_all(self, seconds: float) -> None:
+        now = asyncio.get_running_loop().time()
+        self._resume_at = max(self._resume_at, now + seconds)
 
     async def read_cover(self, jpeg: bytes) -> VisionResult[CoverPageInfo]:
         return await self._call(
@@ -207,10 +222,18 @@ class VisionClient:
         request = self._build_request(system=system, instruction=instruction, jpeg=jpeg,
                                       output_model=output_model, max_tokens=max_tokens)
 
+        kind = output_model.__name__
+
         async def attempt() -> T:
             nonlocal invalid_outputs
             async with self._semaphore:  # held only while the request is in flight
-                await self._pause_if_rate_limited()
+                await self._pause_if_needed()
+                reservation = None
+                if self._limiter is not None:
+                    estimate = self._input_estimates.get(kind, DEFAULT_INPUT_ESTIMATE)
+                    reservation = await self._limiter.acquire(
+                        estimate + min(max_tokens, EXPECTED_OUTPUT_TOKENS)
+                    )
                 try:
                     response = await asyncio.wait_for(
                         self._client.chat.completions.create(**request),
@@ -219,11 +242,25 @@ class VisionClient:
                 except (groq.AuthenticationError, groq.PermissionDeniedError) as exc:
                     raise VisionAuthError("The Groq API rejected the API key.") from exc
                 except groq.RateLimitError as exc:
-                    wait = retry_after(exc) or s.vision_backoff_max_s
-                    loop_now = asyncio.get_running_loop().time()
-                    self._resume_at = max(self._resume_at, loop_now + wait)
+                    self._pause_all(max(retry_after(exc) or 0.0, RATE_LIMIT_MIN_PAUSE_S))
                     raise
-            usage.add(_usage_of(response))
+                except groq.APIConnectionError:
+                    # Network blips hit every queued call alike: pause them all, growing.
+                    self._pause_all(backoff_delay(self._connection_failures,
+                                                  base=max(s.vision_backoff_base_s, 1.0),
+                                                  cap=s.vision_backoff_max_s,
+                                                  rand=lambda: 1.0))
+                    self._connection_failures += 1
+                    raise
+            self._connection_failures = 0
+            call_usage = _usage_of(response)
+            usage.add(call_usage)
+            if call_usage.input_tokens:
+                self._input_estimates[kind] = call_usage.input_tokens
+            if reservation is not None:
+                TokenRateLimiter.settle(
+                    reservation, call_usage.input_tokens + call_usage.output_tokens
+                )
             try:
                 return _validate(response, output_model)
             except InvalidOutputError as exc:
@@ -237,6 +274,7 @@ class VisionClient:
             base=s.vision_backoff_base_s,
             cap=s.vision_backoff_max_s,
             label=label,
+            rate_limit_retries=s.vision_rate_limit_retries,
         )
         logger.info(
             "%s ok: %d calls, %d in / %d out tokens, %d cached",

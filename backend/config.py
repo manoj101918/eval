@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     vision_max_concurrency: int = Field(default=2, ge=1)
     vision_call_timeout_s: float = Field(default=90.0, gt=0)
     vision_max_retries: int = Field(default=4, ge=0)
+    # 429s get their own, larger budget: on a low-limit tier they are expected, not faults.
+    vision_rate_limit_retries: int = Field(default=10, ge=0)
+    # Client-side pacing; 0 disables. Groq free tier for qwen3.8-27b: 8,000 tokens/minute.
+    vision_tokens_per_minute: int = Field(default=8000, ge=0)
     vision_backoff_base_s: float = Field(default=1.0, ge=0)
     vision_backoff_max_s: float = Field(default=30.0, ge=0)
     vision_max_tokens: int = Field(default=4096, ge=256, le=16384)

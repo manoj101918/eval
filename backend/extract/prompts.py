@@ -11,7 +11,8 @@ calculations, do not complete unfinished sentences, and do not add explanations.
 - Split the page into segments in reading order. A new segment starts at each question label \
 the student writes, such as "Q1", "2(a)", "Ans 3" or "31. a) (i)", usually at the start of a \
 line or in the left margin. Put that one label in question_number and leave it out of text. \
-Never put several labels in one question_number.
+Never put several labels in one question_number. Section headings such as "SECTION-A" are \
+not question labels.
 - Write question_number as the full label: when the student writes only a sub-part under a \
 question, include the parent, e.g. "b)" written under question 31 becomes "31 b", and "(ii)" \
 under "31 a (i)" becomes "31 a (ii)".

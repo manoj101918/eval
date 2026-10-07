@@ -48,7 +48,7 @@ def main(
     args = build_parser().parse_args(argv)
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
-        format="%(levelname)s %(name)s: %(message)s",
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )
     if hasattr(sys.stdout, "reconfigure"):

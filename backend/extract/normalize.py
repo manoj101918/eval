@@ -3,20 +3,29 @@
 import re
 
 _PREFIX = re.compile(r"^(question|ques|answer|ans|qn|q)(?=[\s.:\-)(\d]|$)\s*[.:\-)]*\s*")
-_NON_ALNUM = re.compile(r"[^0-9a-z]")
+_SECTION = re.compile(r"^(section|sec)\b")
+_TOKENS = re.compile(r"\d+|[a-z]+")
 
 
 def normalize_question_label(label: str | None) -> str | None:
     """Map labels like 'Q.1(a)', '1 a', 'Ans 1a' to a canonical key ('1a').
 
-    Returns None when nothing usable remains.
+    Adjacent numbers keep a dot so '31 (1)' -> '31.1' stays distinct from question 311.
+    Section headings ('SECTION-A') are not question labels. Returns None when nothing
+    usable remains.
     """
     if label is None:
         return None
     s = label.strip().lower()
+    if _SECTION.match(s):
+        return None
     s = _PREFIX.sub("", s)
-    s = _NON_ALNUM.sub("", s)
-    return s or None
+    key = ""
+    for token in _TOKENS.findall(s):
+        if key and token.isdigit() and key[-1].isdigit():
+            key += "."
+        key += token
+    return key or None
 
 
 _ROMAN = re.compile(r"[ivx]+")
