@@ -24,6 +24,11 @@ dev = [
     "qrcode>=7.4",
     "ruff>=0.5",
 ]
+# python -m experiments.ocr_compare (OCR engine comparison; not used by the app)
+experiments = [
+    "easyocr>=1.7",
+    "azure-ai-documentintelligence>=1.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["backend*"]
