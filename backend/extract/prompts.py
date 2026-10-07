@@ -50,8 +50,3 @@ handwriting is upright and reads normally left to right, top to bottom.\
 """
 
 ORIENTATION_USER = "Which tile is upright?"
-
-# Appended to the system prompt in json_object mode (no constrained decoding).
-JSON_OBJECT_SUFFIX = (
-    "Respond with a single JSON object only, no other text, that matches this JSON schema: "
-)

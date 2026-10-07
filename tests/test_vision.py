@@ -263,7 +263,7 @@ async def test_connection_error_pauses_other_calls():
 
 async def test_rate_limit_pause_has_a_floor(monkeypatch):
     """Groq sometimes says retry-after: 1 when the window needs longer."""
-    import backend.extract.vision as vision_module
+    import backend.llm.groq_chat as vision_module
 
     monkeypatch.setattr(vision_module, "RATE_LIMIT_MIN_PAUSE_S", 0.3)
     times = []
