@@ -130,3 +130,16 @@ def test_needs_exactly_one_input(scheme, extra):
     with pytest.raises(SystemExit) as exc:
         main(["--scheme", str(scheme), *extra], settings=settings())
     assert exc.value.code == 2
+
+
+def test_output_file_is_plain_utf8(scheme, script_json, tmp_path, capsys):
+    out_file = tmp_path / "grades.json"
+    code = main(["--scheme", str(scheme), "--script", str(script_json), "-o", str(out_file)],
+                settings=settings(), grader_factory=grader_factory(lambda r: grade(2.5)))
+    out, err = capsys.readouterr()
+    assert code == 0
+    assert out == ""  # nothing on stdout; summary still on stderr
+    assert "Proposed total" in err
+    raw = out_file.read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf")
+    assert json.loads(raw.decode("utf-8"))["total_marks"] == 3.5

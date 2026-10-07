@@ -17,6 +17,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from backend.cli_utils import emit_json
 from backend.config import Settings, get_settings
 from backend.extract.clients import TranscriptionClient, make_client
 from backend.extract.ingest import IngestError
@@ -39,6 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("paths", nargs="*", type=Path,
                         help="or the scan itself: one PDF, page images, or a directory")
     parser.add_argument("--pretty", action="store_true", help="indent the JSON output")
+    parser.add_argument("-o", "--output", type=Path,
+                        help="write the JSON to this file (UTF-8) instead of the screen")
     parser.add_argument("-v", "--verbose", action="store_true", help="log progress to stderr")
     return parser
 
@@ -107,7 +110,7 @@ def main(
         return 1
     elapsed = time.perf_counter() - start
 
-    print(result.model_dump_json(indent=2 if args.pretty else None))
+    emit_json(result.model_dump_json(indent=2 if args.pretty else None), args.output)
     print(
         f"Proposed total: {result.total_marks:g} / {result.max_marks:g} "
         f"({result.needs_review} to review, {len(result.failed)} failed, "

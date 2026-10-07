@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from backend.cli_utils import emit_json
 from backend.config import Settings, get_settings
 from backend.extract.clients import TranscriptionClient, make_client
 from backend.extract.ingest import IngestError
@@ -29,6 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="one PDF, several page images, or a directory of images")
     parser.add_argument("--concurrency", type=int, help="max parallel vision calls")
     parser.add_argument("--pretty", action="store_true", help="indent the JSON output")
+    parser.add_argument("-o", "--output", type=Path,
+                        help="write the JSON to this file (UTF-8) instead of the screen")
     parser.add_argument("-v", "--verbose", action="store_true", help="log progress to stderr")
     return parser
 
@@ -75,7 +78,7 @@ def main(
         return 1
     elapsed = time.perf_counter() - start
 
-    print(result.model_dump_json(indent=2 if args.pretty else None))
+    emit_json(result.model_dump_json(indent=2 if args.pretty else None), args.output)
     print(
         f"Total time: {elapsed:.1f}s ({result.pages_total} pages, "
         f"{len(result.blank_pages)} blank, {len(result.failed_pages)} failed, "

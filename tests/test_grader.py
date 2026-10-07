@@ -200,3 +200,26 @@ async def test_logs_have_no_answers_or_reasons(caplog):
     assert "grade question 5" in caplog.text
     assert SECRET_ANSWER not in caplog.text
     assert "Two correct points." not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("confidence", "flagged"), [("medium", True), ("low", True), ("high", False)]
+)
+async def test_lost_marks_flagged_unless_highly_confident(confidence, flagged):
+    result, _ = await run([item("34(a)", 2)], {"34a": "a, b, c, c"},
+                          lambda r: grade_json(1, confidence=confidence))
+    q = by_question(result)["34(a)"]
+    assert q.needs_review is flagged
+    assert ("marks deducted with less than high confidence" in q.review_notes) is (
+        confidence != "high")
+
+
+async def test_full_marks_with_medium_confidence_not_flagged():
+    result, _ = await run([item("5", 2)], {"5": "answer"}, lambda r: grade_json(3, "medium"))
+    assert by_question(result)["5"].needs_review is False
+
+
+def test_prompt_warns_about_single_character_misreads():
+    from backend.grading.prompts import GRADING_SYSTEM
+
+    assert "single characters" in GRADING_SYSTEM and "ocr_problem" in GRADING_SYSTEM

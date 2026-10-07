@@ -114,8 +114,11 @@ class Grader:
                     return self._result(m, status="failed", marks=None, needs_review=True,
                                         reason="The model's marks were out of range; "
                                                "grade by hand.")
+        # Lost marks are where an OCR misread hurts the student: flag them unless the model
+        # is highly confident.
+        lost_marks = grade.marks_awarded < item.max_marks and grade.confidence != "high"
         needs_review = (grade.confidence == "low" or grade.ocr_problem or m.has_diagram
-                        or m.illegible or bool(m.notes))
+                        or m.illegible or bool(m.notes) or lost_marks)
         q = self._result(m, status="graded", marks=grade.marks_awarded,
                          confidence=grade.confidence, reason=grade.reason,
                          needs_review=needs_review)
@@ -124,6 +127,8 @@ class Grader:
             q.review_notes.append("transcription too garbled to grade reliably")
         if m.has_diagram:
             q.review_notes.append("answer has a diagram or equation the grader could not see")
+        if lost_marks:
+            q.review_notes.append("marks deducted with less than high confidence")
         return q
 
     def _result(self, m: MatchedItem, *, status, marks, needs_review, reason="",

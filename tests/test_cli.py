@@ -133,3 +133,13 @@ def test_cli_azure_without_keys_explains(script_dir, capsys):
     _, err = capsys.readouterr()
     assert code == 1
     assert "AZURE_DI_ENDPOINT" in err
+
+
+def test_cli_output_file(script_dir, tmp_path, capsys):
+    out_file = tmp_path / "result.json"
+    code = main([str(script_dir), "--output", str(out_file)], settings=settings(),
+                vision_factory=factory(ok_handler))
+    out, err = capsys.readouterr()
+    assert code == 0 and out == ""
+    assert "Total time:" in err
+    assert json.loads(out_file.read_text(encoding="utf-8"))["answers"]["1"]["text"] == "answer"
