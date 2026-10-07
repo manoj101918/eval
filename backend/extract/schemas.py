@@ -47,6 +47,12 @@ class CoverPageInfo(BaseModel):
     )
 
 
+class OrientationCheck(BaseModel):
+    upright_tile: Literal[1, 2, 3, 4] = Field(
+        description="Number of the tile in which the handwriting is upright and readable."
+    )
+
+
 # --- Pipeline output ---------------------------------------------------------
 
 
@@ -84,6 +90,7 @@ class ExtractionResult(BaseModel):
     roll_number: str | None
     roll_number_source: Literal["qr", "vision"] | None
     pages_total: int
+    page_rotation: int = Field(description="Degrees counter-clockwise applied to every page.")
     cover_page: int | None
     blank_pages: list[int]
     failed_pages: list[int]

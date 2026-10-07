@@ -62,6 +62,10 @@ def user_text(request: dict[str, Any]) -> str:
     return request["messages"][-1]["content"][-1]["text"]
 
 
+def is_orientation_check(request: dict[str, Any]) -> bool:
+    return user_text(request) == "Which tile is upright?"
+
+
 def page_number_of(request: dict[str, Any]) -> int | None:
     """Page number from a transcription request's instruction text (None for the cover call)."""
     m = re.search(r"page (\d+) of the script", user_text(request))

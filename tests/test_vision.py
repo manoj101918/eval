@@ -70,26 +70,58 @@ async def test_transcribe_page_success():
     request = fake.completions.calls[0]
     assert request["model"] == "qwen/qwen3.8-27b"
     assert request["reasoning_effort"] == "none"
-    assert request["max_completion_tokens"] == 8000
+    assert request["max_completion_tokens"] == 4096
     system, user = request["messages"]
     assert system["role"] == "system" and "transcribe" in system["content"]
+    assert '"segments"' in system["content"]  # json_object mode: schema is in the prompt
     image = user["content"][0]["image_url"]["url"]
     assert image.startswith("data:image/jpeg;base64,")
     assert base64.b64decode(image.split(",", 1)[1]) == JPEG
     assert "page 2 of the script" in user_text(request)
+    assert request["response_format"] == {"type": "json_object"}
+
+
+async def test_json_schema_mode_uses_strict_schema():
+    fake = FakeGroq(scripted(message(PAGE)))
+    client = VisionClient(fake, settings(vision_response_format="json_schema"))
+    await client.transcribe_page(JPEG, page_number=1)
+    request = fake.completions.calls[0]
     fmt = request["response_format"]
     assert fmt["type"] == "json_schema"
     assert fmt["json_schema"]["strict"] is True
     assert fmt["json_schema"]["name"] == "PageTranscription"
+    assert '"segments"' not in request["messages"][0]["content"]
 
 
-async def test_json_object_mode_puts_schema_in_prompt():
-    fake = FakeGroq(scripted(message(PAGE)))
-    client = VisionClient(fake, settings(vision_response_format="json_object"))
-    await client.transcribe_page(JPEG, page_number=1)
-    request = fake.completions.calls[0]
-    assert request["response_format"] == {"type": "json_object"}
-    assert '"segments"' in request["messages"][0]["content"]
+async def test_check_orientation():
+    fake = FakeGroq(scripted(message({"upright_tile": 2})))
+    result = await VisionClient(fake, settings()).check_orientation(JPEG)
+    assert result.data.upright_tile == 2
+    assert fake.completions.calls[0]["max_completion_tokens"] == 64
+
+
+async def test_orientation_rejects_out_of_range_tile():
+    fake = FakeGroq(scripted(message({"upright_tile": 5}), message({"upright_tile": 7})))
+    with pytest.raises(InvalidOutputError):
+        await VisionClient(fake, settings()).check_orientation(JPEG)
+
+
+async def test_rate_limit_pauses_other_calls():
+    """After a 429 with retry-after, queued calls wait instead of hitting the limit too."""
+    times = []
+
+    def handler(request):
+        times.append(asyncio.get_running_loop().time())
+        if len(times) == 1:
+            return api_error(groq.RateLimitError, 429, {"retry-after": "0.3"})
+        return message(PAGE)
+
+    fake = FakeGroq(handler)
+    client = VisionClient(fake, settings(vision_max_concurrency=1))
+    await asyncio.gather(client.transcribe_page(JPEG, page_number=1),
+                         client.transcribe_page(JPEG, page_number=2))
+    assert len(times) == 3
+    assert min(times[1:]) - times[0] >= 0.25
 
 
 async def test_read_cover():

@@ -8,9 +8,13 @@ a correction you make could change the student's marks.
 Rules:
 - Transcribe exactly what the student wrote. Do not fix spelling, grammar, facts or \
 calculations, do not complete unfinished sentences, and do not add explanations.
-- Split the page into segments, one per answer, in reading order. A new segment starts where \
-the student writes a question label such as "Q1", "2(a)", "Ans 3" or "1.b". Put the label in \
-question_number exactly as written, and leave it out of text.
+- Split the page into segments in reading order. A new segment starts at each question label \
+the student writes, such as "Q1", "2(a)", "Ans 3" or "31. a) (i)", usually at the start of a \
+line or in the left margin. Put that one label in question_number and leave it out of text. \
+Never put several labels in one question_number.
+- Write question_number as the full label: when the student writes only a sub-part under a \
+question, include the parent, e.g. "b)" written under question 31 becomes "31 b", and "(ii)" \
+under "31 a (i)" becomes "31 a (ii)".
 - If the page starts with text that has no label, it continues an answer from the previous \
 page: make it the first segment with question_number null.
 - Write equations and formulas inline in plain text, e.g. "x^2 + 3x - 4 = 0", "H2O", \
@@ -37,6 +41,14 @@ than guessing.\
 """
 
 COVER_USER = "Read the roll number from this cover page."
+
+ORIENTATION_SYSTEM = """\
+You check the orientation of scanned handwritten exam pages. The image shows the same page \
+four times, in tiles numbered 1-4, each rotated differently. Pick the tile in which the \
+handwriting is upright and reads normally left to right, top to bottom.\
+"""
+
+ORIENTATION_USER = "Which tile is upright?"
 
 # Appended to the system prompt in json_object mode (no constrained decoding).
 JSON_OBJECT_SUFFIX = (

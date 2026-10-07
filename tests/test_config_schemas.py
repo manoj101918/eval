@@ -9,6 +9,8 @@ def test_settings_defaults():
     s = Settings(_env_file=None)
     assert s.vision_model == "qwen/qwen3.8-27b"
     assert s.vision_reasoning_effort == "none"
+    assert s.vision_response_format == "json_object"
+    assert s.page_rotation == "auto"
     assert s.image_max_px == 1500
     assert s.has_cover_page is True
 

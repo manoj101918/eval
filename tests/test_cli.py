@@ -23,7 +23,7 @@ def script_dir(tmp_path_factory):
 
 def settings():
     return Settings(_env_file=None, vision_backoff_base_s=0, vision_backoff_max_s=0,
-                    vision_max_retries=0)
+                    vision_max_retries=0, page_rotation="0")
 
 
 def factory(handler):

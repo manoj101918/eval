@@ -6,11 +6,10 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-import groq
-
 from backend.config import Settings, get_settings
-from backend.extract.ingest import load_script
-from backend.extract.normalize import normalize_question_label
+from backend.extract.ingest import RawPage, load_script
+from backend.extract.normalize import normalize_question_label, qualify_label
+from backend.extract.orientation import detect_rotation, rotate
 from backend.extract.preprocess import PageImage, preprocess_page
 from backend.extract.roll_number import RollNumberResult, read_roll_number
 from backend.extract.schemas import (
@@ -20,12 +19,10 @@ from backend.extract.schemas import (
     UnassignedText,
     Usage,
 )
-from backend.extract.vision import VisionAuthError, VisionClient, VisionError, VisionResult
+from backend.extract.vision import PAGE_FAILURES, VisionAuthError, VisionClient, VisionResult
 
 logger = logging.getLogger(__name__)
 
-# Failures that mark one page as failed; anything else is a bug and propagates.
-PAGE_FAILURES = (VisionError, groq.APIError, TimeoutError)
 
 
 def merge_pages(
@@ -45,7 +42,8 @@ def merge_pages(
             current = None
             continue
         for seg in transcription.segments:
-            key = normalize_question_label(seg.question_number) or current
+            label = normalize_question_label(seg.question_number)
+            key = qualify_label(label, current) if label else current
             if key is None:
                 unassigned.append(
                     UnassignedText(page=page_no, text=seg.text, has_diagram=seg.has_diagram,
@@ -83,6 +81,35 @@ async def _transcribe(
         return page_no, None
 
 
+async def _preprocess_all(raw_pages: Sequence[RawPage], s: Settings) -> list[PageImage]:
+    return await asyncio.gather(
+        *(
+            asyncio.to_thread(preprocess_page, raw, max_px=s.image_max_px,
+                              jpeg_quality=s.jpeg_quality, blank_ink_ratio=s.blank_ink_ratio)
+            for raw in raw_pages
+        )
+    )
+
+
+def _rotated(raw: RawPage, degrees: int) -> RawPage:
+    return RawPage(index=raw.index, image=rotate(raw.image, degrees))
+
+
+async def _resolve_rotation(
+    raw_pages: Sequence[RawPage], pages: Sequence[PageImage], s: Settings, vision: VisionClient
+) -> tuple[int, Usage]:
+    """Rotation for the whole script: forced by settings, or checked once on the
+    answer page with the most ink (the clearest orientation cue)."""
+    if s.page_rotation != "auto":
+        return int(s.page_rotation), Usage()
+    first_answer = 1 if s.has_cover_page else 0
+    candidates = [p for p in pages[first_answer:] if not p.blank]
+    if not candidates:
+        return 0, Usage()
+    sample = max(candidates, key=lambda p: p.ink_ratio)
+    return await detect_rotation(raw_pages[sample.index].image, vision=vision)
+
+
 async def extract_script(
     paths: Sequence[Path],
     *,
@@ -94,13 +121,14 @@ async def extract_script(
     start = time.perf_counter()
 
     raw_pages = await asyncio.to_thread(load_script, paths, dpi=s.pdf_render_dpi)
-    pages = await asyncio.gather(
-        *(
-            asyncio.to_thread(preprocess_page, raw, max_px=s.image_max_px,
-                              jpeg_quality=s.jpeg_quality, blank_ink_ratio=s.blank_ink_ratio)
-            for raw in raw_pages
+    pages = await _preprocess_all(raw_pages, s)
+
+    rotation, rotation_usage = await _resolve_rotation(raw_pages, pages, s, vision)
+    if rotation:
+        raw_pages = await asyncio.gather(
+            *(asyncio.to_thread(_rotated, raw, rotation) for raw in raw_pages)
         )
-    )
+        pages = await _preprocess_all(raw_pages, s)
 
     cover_full_res = raw_pages[0].image if s.has_cover_page else None
     del raw_pages  # keep only the full-res cover in memory (for QR decoding)
@@ -128,6 +156,7 @@ async def extract_script(
         raise
 
     usage = Usage()
+    usage.add(rotation_usage)
     usage.add(roll.usage)
     for _, result in transcribed:
         if result is not None:
@@ -146,6 +175,7 @@ async def extract_script(
         roll_number=roll.value,
         roll_number_source=roll.source,
         pages_total=len(pages),
+        page_rotation=rotation,
         cover_page=1 if s.has_cover_page else None,
         blank_pages=blank_pages,
         failed_pages=failed_pages,

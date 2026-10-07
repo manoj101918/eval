@@ -14,12 +14,13 @@ from pydantic import BaseModel, ValidationError
 
 from backend.config import Settings
 from backend.extract import prompts
-from backend.extract.retry import with_retries
-from backend.extract.schemas import CoverPageInfo, PageTranscription, Usage
+from backend.extract.retry import retry_after, with_retries
+from backend.extract.schemas import CoverPageInfo, OrientationCheck, PageTranscription, Usage
 
 logger = logging.getLogger(__name__)
 
 COVER_MAX_TOKENS = 256
+ORIENTATION_MAX_TOKENS = 64
 MAX_INVALID_OUTPUT_RETRIES = 1
 
 
@@ -37,6 +38,10 @@ class InvalidOutputError(VisionError):
     def __init__(self, message: str, *, retryable: bool) -> None:
         super().__init__(message)
         self.retryable = retryable
+
+
+# Failures that end one vision task (a page) after retries; anything else is a bug.
+PAGE_FAILURES = (VisionError, groq.APIError, TimeoutError)
 
 
 class CompletionsAPI(Protocol):
@@ -97,6 +102,9 @@ class VisionClient:
         self._client = client
         self._settings = settings
         self._semaphore = asyncio.Semaphore(settings.vision_max_concurrency)
+        # When the API rate-limits one call, every call pauses until this loop time, so
+        # queued requests do not all hit the limit again at once.
+        self._resume_at = 0.0
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "VisionClient":
@@ -125,6 +133,21 @@ class VisionClient:
             max_tokens=self._settings.vision_max_tokens,
             label=f"transcribe page {page_number}",
         )
+
+    async def check_orientation(self, mosaic_jpeg: bytes) -> VisionResult[OrientationCheck]:
+        return await self._call(
+            system=prompts.ORIENTATION_SYSTEM,
+            instruction=prompts.ORIENTATION_USER,
+            jpeg=mosaic_jpeg,
+            output_model=OrientationCheck,
+            max_tokens=ORIENTATION_MAX_TOKENS,
+            label="orientation check",
+        )
+
+    async def _pause_if_rate_limited(self) -> None:
+        delay = self._resume_at - asyncio.get_running_loop().time()
+        if delay > 0:
+            await asyncio.sleep(delay)
 
     async def read_cover(self, jpeg: bytes) -> VisionResult[CoverPageInfo]:
         return await self._call(
@@ -187,6 +210,7 @@ class VisionClient:
         async def attempt() -> T:
             nonlocal invalid_outputs
             async with self._semaphore:  # held only while the request is in flight
+                await self._pause_if_rate_limited()
                 try:
                     response = await asyncio.wait_for(
                         self._client.chat.completions.create(**request),
@@ -194,6 +218,11 @@ class VisionClient:
                     )
                 except (groq.AuthenticationError, groq.PermissionDeniedError) as exc:
                     raise VisionAuthError("The Groq API rejected the API key.") from exc
+                except groq.RateLimitError as exc:
+                    wait = retry_after(exc) or s.vision_backoff_max_s
+                    loop_now = asyncio.get_running_loop().time()
+                    self._resume_at = max(self._resume_at, loop_now + wait)
+                    raise
             usage.add(_usage_of(response))
             try:
                 return _validate(response, output_model)

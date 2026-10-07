@@ -1,14 +1,17 @@
+import base64
+import io
 import logging
 
 import groq
 import pytest
+from PIL import Image
 
 from backend.config import Settings
 from backend.extract.pipeline import extract_script, merge_pages
 from backend.extract.schemas import PageSegment, PageTranscription
 from backend.extract.vision import VisionAuthError, VisionClient
 from tests import pages
-from tests.fakes import FakeGroq, api_error, message, page_number_of
+from tests.fakes import FakeGroq, api_error, is_orientation_check, message, page_number_of
 
 ROLL = "21CS045"
 
@@ -52,7 +55,7 @@ def script_dir(tmp_path_factory):
 
 def settings(**overrides):
     base = dict(_env_file=None, vision_backoff_base_s=0, vision_backoff_max_s=0,
-                vision_max_retries=1, vision_max_concurrency=5)
+                vision_max_retries=1, vision_max_concurrency=5, page_rotation="0")
     return Settings(**(base | overrides))
 
 
@@ -221,3 +224,57 @@ async def test_auth_error_aborts_run_and_cancels_other_pages(script_dir):
     with pytest.raises(VisionAuthError):
         await run(script_dir, fake)
     assert finished == []  # slow pages were cancelled, not left running
+
+
+def test_merge_qualifies_bare_sub_part_labels():
+    answers, _ = merge_pages(
+        [(2, page(seg("31 a", "part a"))), (3, page(seg("(ii)", "a-two"), seg("b)", "part b")))]
+    )
+    assert list(answers) == ["31a", "31aii", "31b"]
+
+
+def oriented(tile, transcripts=TRANSCRIPTS):
+    inner = by_page(transcripts)
+
+    def handler(request):
+        if is_orientation_check(request):
+            return message({"upright_tile": tile}, input_tokens=1355, output_tokens=6)
+        return inner(request)
+
+    return handler
+
+
+def jpeg_size(request):
+    url = request["messages"][-1]["content"][0]["image_url"]["url"]
+    return Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))).size
+
+
+async def test_auto_rotation_checks_once_and_rotates_all_pages(script_dir):
+    fake = FakeGroq(oriented(tile=2))
+    result = await run(script_dir, fake, page_rotation="auto")
+
+    assert result.page_rotation == 90
+    orientation_calls = [c for c in fake.completions.calls if is_orientation_check(c)]
+    assert len(orientation_calls) == 1
+    page_calls = [c for c in fake.completions.calls if page_number_of(c)]
+    assert len(page_calls) == 3
+    for call in page_calls:
+        width, height = jpeg_size(call)
+        assert width > height  # portrait scans turned to landscape
+    assert result.usage.api_calls == 4
+    assert result.answers["1"].text == "one-a\n\none-b"
+
+
+async def test_auto_rotation_upright_keeps_pages(script_dir):
+    fake = FakeGroq(oriented(tile=1))
+    result = await run(script_dir, fake, page_rotation="auto")
+    assert result.page_rotation == 0
+    width, height = jpeg_size(next(c for c in fake.completions.calls if page_number_of(c)))
+    assert height > width
+
+
+async def test_forced_rotation_skips_check(script_dir):
+    fake = FakeGroq(oriented(tile=1))
+    result = await run(script_dir, fake, page_rotation="180")
+    assert result.page_rotation == 180
+    assert not any(is_orientation_check(c) for c in fake.completions.calls)
