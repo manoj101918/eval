@@ -40,11 +40,12 @@ class Matching(BaseModel):
 
 
 def _is_descendant(key: str, ancestor: str) -> bool:
-    """'34ai' is below '34' and '34a'; '341' is not below '34' (a different question)."""
+    """'34ai' is below '34' and '34a', '31ai1' is below '31ai' ((i)(1)), but '341' is not
+    below '34': digits directly after digits make a different question number."""
     if not key.startswith(ancestor) or key == ancestor:
         return False
     nxt = key[len(ancestor)]
-    return not nxt.isdigit()
+    return not (nxt.isdigit() and ancestor[-1].isdigit())
 
 
 def mcq_option_from_text(text: str) -> str | None:

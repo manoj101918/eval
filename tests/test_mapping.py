@@ -83,6 +83,13 @@ def test_or_alternatives_share_sub_parts():
     assert got["31"].text == got["31 OR"].text == "part a\n\npart b"
 
 
+def test_numbered_sub_parts_after_letters_are_children():
+    got, unmatched = match([item("31(a)(i)", marks=3)],
+                           **{"31ai1": "differences", "31ai2": "fringe width"})
+    assert got["31(a)(i)"].source_keys == ["31ai1", "31ai2"]
+    assert unmatched == []
+
+
 def test_children_do_not_cross_question_numbers():
     got, unmatched = match([item("3")], **{"34": "other question"})
     assert not got["3"].attempted
