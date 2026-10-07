@@ -4,7 +4,7 @@ Grades handwritten college answer scripts (weekly tests, mids, semester exams) w
 ## Stack
 - Backend: Python 3.12, FastAPI, SQLAlchemy, Alembic, PostgreSQL
 - Jobs: Redis + arq for background processing
-- AI: Anthropic API (Haiku for transcription, Sonnet for grading), prompt caching
+- AI: Groq API (`qwen/qwen3.8-27b` vision model for transcription; grading model chosen in Phase 2)
 - Frontend: Next.js + TypeScript + Tailwind
 - Excel: openpyxl
 - Deploy: Docker Compose
@@ -23,8 +23,10 @@ Grades handwritten college answer scripts (weekly tests, mids, semester exams) w
 
 ## Progress
 ### Phase 1 — Ingestion & extraction (branch `phase-1-extraction`)
-Done, 127 tests passing (all mocked, no network). Live run on a real scan still pending.
-- `backend/extract/`: `ingest` (PDF via PyMuPDF / images / image dir), `preprocess` (grayscale, max 1500px, JPEG, blank detection by ink ratio after removing ruling lines), `roll_number` (OpenCV QR on full-res cover, vision fallback, regex-validated), `vision` (AsyncAnthropic, semaphore, per-call timeout, JSON-schema output validated by Pydantic), `retry` (exp. backoff + jitter, retry-after), `pipeline` (merges page segments into answers by normalised question number).
+Done, 130 tests passing (all mocked, no network). Live run on a real scan still pending.
+- `backend/extract/`: `ingest` (PDF via PyMuPDF / images / image dir), `preprocess` (grayscale, max 1500px, JPEG, blank detection by ink ratio after removing ruling lines), `roll_number` (OpenCV QR on full-res cover, vision fallback, regex-validated), `vision` (AsyncGroq, semaphore, per-call timeout, strict JSON-schema output validated by Pydantic; reasoning off), `retry` (exp. backoff + jitter, retry-after), `pipeline` (merges page segments into answers by normalised question number).
 - CLI: `python -m backend.extract <pdf|images|dir> [--pretty] [--concurrency N]`; offline tuning: `python -m backend.extract.inspect <script>`.
 - Page 1 is treated as the cover (roll number only, never transcribed); `HAS_COVER_PAGE=false` to change.
-- Open items: tune `BLANK_INK_RATIO` on real booklets; Haiku 4.5 needs a 4096-token prefix to cache, so the transcription prompt is not cached yet (caching pays off in grading).
+- Switched from Anthropic to Groq (user decision); Anthropic SDK removed.
+- Sample: `samples/script1.pdf` = public CBSE 2023 Class 12 Physics topper sheet (29 pages, git-ignored).
+- Open items: confirm strict `json_schema` works with images on Groq (else `VISION_RESPONSE_FORMAT=json_object`); tune `BLANK_INK_RATIO` on booklets that have blank pages.

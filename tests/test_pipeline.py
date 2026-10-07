@@ -1,6 +1,6 @@
 import logging
 
-import anthropic
+import groq
 import pytest
 
 from backend.config import Settings
@@ -8,7 +8,7 @@ from backend.extract.pipeline import extract_script, merge_pages
 from backend.extract.schemas import PageSegment, PageTranscription
 from backend.extract.vision import VisionAuthError, VisionClient
 from tests import pages
-from tests.fakes import FakeAnthropic, api_error, message, page_number_of
+from tests.fakes import FakeGroq, api_error, message, page_number_of
 
 ROLL = "21CS045"
 
@@ -62,7 +62,7 @@ def by_page(transcripts=TRANSCRIPTS, failures=()):
         if n is None:
             return message({"roll_number": "SHOULD-NOT-BE-CALLED"})
         if n in failures:
-            return api_error(anthropic.BadRequestError, 400)
+            return api_error(groq.BadRequestError, 400)
         return message(transcripts[n], input_tokens=1000, output_tokens=100)
 
     return handler
@@ -139,7 +139,7 @@ def test_page_segment_schema_requires_all_fields():
 
 
 async def test_extract_script_end_to_end(script_dir):
-    fake = FakeAnthropic(by_page())
+    fake = FakeGroq(by_page())
     result = await run(script_dir, fake)
 
     assert result.roll_number == ROLL
@@ -148,7 +148,7 @@ async def test_extract_script_end_to_end(script_dir):
     assert result.cover_page == 1
     assert result.blank_pages == [3]
     assert result.failed_pages == []
-    assert sorted(page_number_of(c) for c in fake.messages.calls) == [2, 4, 5]  # no cover call
+    assert sorted(page_number_of(c) for c in fake.completions.calls) == [2, 4, 5]  # no cover call
 
     assert result.answers["1"].text == "one-a\n\none-b"
     assert result.answers["1"].pages == [2, 4]
@@ -160,13 +160,13 @@ async def test_extract_script_end_to_end(script_dir):
 
 
 async def test_out_of_order_completion_still_merges_in_page_order(script_dir):
-    fake = FakeAnthropic(by_page(), delay=lambda r: 0.1 if page_number_of(r) == 2 else 0)
+    fake = FakeGroq(by_page(), delay=lambda r: 0.1 if page_number_of(r) == 2 else 0)
     result = await run(script_dir, fake)
     assert result.answers["1"].text == "one-a\n\none-b"
 
 
 async def test_failed_page_is_reported_and_rest_completes(script_dir):
-    fake = FakeAnthropic(by_page(failures={4}))
+    fake = FakeGroq(by_page(failures={4}))
     result = await run(script_dir, fake)
     assert result.failed_pages == [4]
     assert result.answers["1"].text == "one-a"
@@ -175,23 +175,23 @@ async def test_failed_page_is_reported_and_rest_completes(script_dir):
 
 
 async def test_concurrency_limit_respected(script_dir):
-    fake = FakeAnthropic(by_page(), delay=0.05)
+    fake = FakeGroq(by_page(), delay=0.05)
     await run(script_dir, fake, vision_max_concurrency=2)
-    assert fake.messages.peak_in_flight == 2
+    assert fake.completions.peak_in_flight == 2
 
 
 async def test_without_cover_page_all_pages_are_transcribed(script_dir):
     transcripts = dict(TRANSCRIPTS) | {1: {"segments": []}}
-    fake = FakeAnthropic(by_page(transcripts))
+    fake = FakeGroq(by_page(transcripts))
     result = await run(script_dir, fake, has_cover_page=False)
     assert result.roll_number is None
     assert result.cover_page is None
-    assert sorted(page_number_of(c) for c in fake.messages.calls) == [1, 2, 4, 5]
+    assert sorted(page_number_of(c) for c in fake.completions.calls) == [1, 2, 4, 5]
 
 
 async def test_logs_never_contain_student_data(script_dir, caplog):
     caplog.set_level(logging.DEBUG)
-    fake = FakeAnthropic(by_page(failures={5}))
+    fake = FakeGroq(by_page(failures={5}))
     await run(script_dir, fake)
     assert "page 5 failed" in caplog.text
     for secret in (ROLL, "one-a", "one-b", "two", "page1.jpg", str(script_dir)):
@@ -201,7 +201,7 @@ async def test_logs_never_contain_student_data(script_dir, caplog):
 async def test_auth_error_aborts_run_and_cancels_other_pages(script_dir):
     def handler(request):
         if page_number_of(request) == 2:
-            return api_error(anthropic.AuthenticationError, 401)
+            return api_error(groq.AuthenticationError, 401)
         return message(TRANSCRIPTS[page_number_of(request)])
 
     finished = []
@@ -209,15 +209,15 @@ async def test_auth_error_aborts_run_and_cancels_other_pages(script_dir):
     def delay(request):
         return 0 if page_number_of(request) == 2 else 0.5
 
-    fake = FakeAnthropic(handler, delay=delay)
-    original_create = fake.messages.create
+    fake = FakeGroq(handler, delay=delay)
+    original_create = fake.completions.create
 
     async def tracking_create(**request):
         result = await original_create(**request)
         finished.append(page_number_of(request))
         return result
 
-    fake.messages.create = tracking_create
+    fake.completions.create = tracking_create
     with pytest.raises(VisionAuthError):
         await run(script_dir, fake)
     assert finished == []  # slow pages were cancelled, not left running

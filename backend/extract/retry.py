@@ -5,7 +5,7 @@ import logging
 import random
 from collections.abc import Awaitable, Callable
 
-import anthropic
+import groq
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +16,9 @@ MAX_RETRY_AFTER_S = 60.0
 def is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, TimeoutError):  # asyncio.wait_for timeout
         return True
-    if isinstance(exc, anthropic.APIConnectionError):  # includes APITimeoutError
+    if isinstance(exc, groq.APIConnectionError):  # includes APITimeoutError
         return True
-    if isinstance(exc, anthropic.APIStatusError):
+    if isinstance(exc, groq.APIStatusError):
         return exc.status_code in RETRYABLE_STATUS or exc.status_code >= 500
     return bool(getattr(exc, "retryable", False))
 
@@ -32,7 +32,7 @@ def backoff_delay(
 
 def retry_after(exc: BaseException) -> float | None:
     """Server-requested delay (seconds) from a `retry-after` header, if any."""
-    if not isinstance(exc, anthropic.APIStatusError):
+    if not isinstance(exc, groq.APIStatusError):
         return None
     value = exc.response.headers.get("retry-after")
     try:

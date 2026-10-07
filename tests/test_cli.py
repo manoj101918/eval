@@ -1,6 +1,6 @@
 import json
 
-import anthropic
+import groq
 import pytest
 from PIL import Image
 
@@ -9,7 +9,7 @@ from backend.extract import inspect as inspect_cli
 from backend.extract.__main__ import main
 from backend.extract.vision import VisionClient
 from tests import pages
-from tests.fakes import FakeAnthropic, api_error, message, page_number_of
+from tests.fakes import FakeGroq, api_error, message, page_number_of
 
 
 @pytest.fixture(scope="module")
@@ -28,7 +28,7 @@ def settings():
 
 def factory(handler):
     def make(s):
-        return VisionClient(FakeAnthropic(handler), s)
+        return VisionClient(FakeGroq(handler), s)
 
     return make
 
@@ -63,7 +63,7 @@ def test_cli_concurrency_flag(script_dir, capsys):
 
     def make(s):
         seen["limit"] = s.vision_max_concurrency
-        return VisionClient(FakeAnthropic(ok_handler), s)
+        return VisionClient(FakeGroq(ok_handler), s)
 
     main([str(script_dir), "--concurrency", "2"], settings=settings(), vision_factory=make)
     assert seen["limit"] == 2
@@ -71,7 +71,7 @@ def test_cli_concurrency_flag(script_dir, capsys):
 
 def test_cli_failed_pages_exit_2(script_dir, capsys):
     code = main([str(script_dir)], settings=settings(),
-                vision_factory=factory(lambda r: api_error(anthropic.InternalServerError, 500)))
+                vision_factory=factory(lambda r: api_error(groq.InternalServerError, 500)))
     out, _ = capsys.readouterr()
     assert code == 2
     assert json.loads(out)["failed_pages"] == [2]
@@ -108,8 +108,8 @@ def test_inspect_threshold_override(tmp_path, capsys, monkeypatch):
 
 def test_cli_auth_error_exit_1(script_dir, capsys):
     code = main([str(script_dir)], settings=settings(),
-                vision_factory=factory(lambda r: api_error(anthropic.AuthenticationError, 401)))
+                vision_factory=factory(lambda r: api_error(groq.AuthenticationError, 401)))
     out, err = capsys.readouterr()
     assert code == 1
     assert out == ""
-    assert "ANTHROPIC_API_KEY" in err
+    assert "GROQ_API_KEY" in err

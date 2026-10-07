@@ -1,6 +1,7 @@
 """Application settings, loaded from environment variables / .env."""
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,19 +10,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    anthropic_api_key: SecretStr | None = None
+    groq_api_key: SecretStr | None = None
 
-    # Models
-    transcribe_model: str = "claude-haiku-4-5"
-    grading_model: str = "claude-sonnet-5-5"
+    # Vision model (Groq)
+    vision_model: str = "qwen/qwen3.8-27b"
+    vision_reasoning_effort: Literal["none", "default", "low", "medium", "high"] = "none"
+    # json_schema: constrained decoding (strict). json_object: schema given in the prompt.
+    vision_response_format: Literal["json_schema", "json_object"] = "json_schema"
 
     # Vision calls
-    vision_max_concurrency: int = Field(default=5, ge=1)
+    vision_max_concurrency: int = Field(default=3, ge=1)
     vision_call_timeout_s: float = Field(default=90.0, gt=0)
     vision_max_retries: int = Field(default=4, ge=0)
     vision_backoff_base_s: float = Field(default=1.0, ge=0)
     vision_backoff_max_s: float = Field(default=30.0, ge=0)
-    vision_max_tokens: int = Field(default=8000, ge=256)
+    vision_max_tokens: int = Field(default=8000, ge=256, le=16384)
 
     # Image preprocessing
     image_max_px: int = Field(default=1500, ge=100)

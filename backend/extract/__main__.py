@@ -65,7 +65,7 @@ def main(
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except VisionAuthError as exc:
-        print(f"error: {exc} Set ANTHROPIC_API_KEY in .env.", file=sys.stderr)
+        print(f"error: {exc} Set GROQ_API_KEY in .env.", file=sys.stderr)
         return 1
     elapsed = time.perf_counter() - start
 

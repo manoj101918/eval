@@ -7,7 +7,8 @@ from backend.extract.schemas import PageTranscription, Usage
 
 def test_settings_defaults():
     s = Settings(_env_file=None)
-    assert s.transcribe_model == "claude-haiku-4-5"
+    assert s.vision_model == "qwen/qwen3.8-27b"
+    assert s.vision_reasoning_effort == "none"
     assert s.image_max_px == 1500
     assert s.has_cover_page is True
 
@@ -56,6 +57,6 @@ def test_page_transcription_rejects_missing_fields():
 
 def test_usage_add():
     total = Usage()
-    total.add(Usage(api_calls=1, input_tokens=10, output_tokens=5, cache_read_input_tokens=3))
+    total.add(Usage(api_calls=1, input_tokens=10, output_tokens=5, cached_input_tokens=3))
     total.add(Usage(api_calls=1, input_tokens=1, output_tokens=1))
-    assert total == Usage(api_calls=2, input_tokens=11, output_tokens=6, cache_read_input_tokens=3)
+    assert total == Usage(api_calls=2, input_tokens=11, output_tokens=6, cached_input_tokens=3)

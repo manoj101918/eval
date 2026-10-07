@@ -1,20 +1,20 @@
 import logging
 
-import anthropic
+import groq
 import pytest
 
 from backend.config import Settings
 from backend.extract.roll_number import decode_qr, match_roll_number, read_roll_number
 from backend.extract.vision import VisionClient
 from tests import pages
-from tests.fakes import FakeAnthropic, api_error, message, scripted
+from tests.fakes import FakeGroq, api_error, message, scripted
 
 PATTERN = r"[A-Z0-9]{5,15}"
 JPEG = b"\xff\xd8cover"
 
 
 def vision(handler):
-    fake = FakeAnthropic(handler)
+    fake = FakeGroq(handler)
     s = Settings(_env_file=None, vision_backoff_base_s=0, vision_backoff_max_s=0,
                  vision_max_retries=1)
     return VisionClient(fake, s), fake
@@ -51,7 +51,7 @@ async def test_qr_path_skips_vision():
         pages.cover_page("21CS045"), JPEG, vision=client, pattern=PATTERN
     )
     assert (result.value, result.source) == ("21CS045", "qr")
-    assert fake.messages.calls == []
+    assert fake.completions.calls == []
     assert result.usage.api_calls == 0
 
 
@@ -59,7 +59,7 @@ async def test_no_qr_falls_back_to_vision():
     client, fake = vision(scripted(message({"roll_number": "22EC101"})))
     result = await read_roll_number(pages.cover_page(None), JPEG, vision=client, pattern=PATTERN)
     assert (result.value, result.source) == ("22EC101", "vision")
-    assert len(fake.messages.calls) == 1
+    assert len(fake.completions.calls) == 1
     assert result.usage.api_calls == 1
 
 
@@ -84,7 +84,7 @@ async def test_vision_value_must_match_pattern():
 
 
 async def test_vision_failure_does_not_raise():
-    client, _ = vision(lambda _r: api_error(anthropic.BadRequestError, 400))
+    client, _ = vision(lambda _r: api_error(groq.BadRequestError, 400))
     result = await read_roll_number(pages.cover_page(None), JPEG, vision=client, pattern=PATTERN)
     assert (result.value, result.source) == (None, None)
 

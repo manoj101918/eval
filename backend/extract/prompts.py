@@ -1,4 +1,4 @@
-"""Prompts for the vision model. Kept byte-stable so the system prompt can be cached."""
+"""Prompts for the vision model. Keep them byte-stable so provider-side prompt caching can apply."""
 
 TRANSCRIBE_SYSTEM = """\
 You transcribe single pages of handwritten college exam answer scripts. Your transcription is \
@@ -37,3 +37,8 @@ than guessing.\
 """
 
 COVER_USER = "Read the roll number from this cover page."
+
+# Appended to the system prompt in json_object mode (no constrained decoding).
+JSON_OBJECT_SUFFIX = (
+    "Respond with a single JSON object only, no other text, that matches this JSON schema: "
+)

@@ -54,15 +54,13 @@ class Usage(BaseModel):
     api_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    cache_creation_input_tokens: int = 0
-    cache_read_input_tokens: int = 0
+    cached_input_tokens: int = 0
 
     def add(self, other: "Usage") -> None:
         self.api_calls += other.api_calls
         self.input_tokens += other.input_tokens
         self.output_tokens += other.output_tokens
-        self.cache_creation_input_tokens += other.cache_creation_input_tokens
-        self.cache_read_input_tokens += other.cache_read_input_tokens
+        self.cached_input_tokens += other.cached_input_tokens
 
 
 class Answer(BaseModel):

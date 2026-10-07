@@ -1,12 +1,15 @@
-"""Async vision-model client: bounded concurrency, per-call timeouts, retries, schema validation."""
+"""Async vision-model client (Groq): bounded concurrency, per-call timeouts, retries,
+schema validation."""
 
 import asyncio
 import base64
+import copy
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-import anthropic
+import groq
 from pydantic import BaseModel, ValidationError
 
 from backend.config import Settings
@@ -26,10 +29,6 @@ class VisionError(Exception):
     retryable = False
 
 
-class OutputRefusedError(VisionError):
-    pass
-
-
 class VisionAuthError(VisionError):
     """Credentials are missing or rejected. Fatal for the whole run, not just one page."""
 
@@ -40,12 +39,16 @@ class InvalidOutputError(VisionError):
         self.retryable = retryable
 
 
-class MessagesAPI(Protocol):
+class CompletionsAPI(Protocol):
     async def create(self, **kwargs: Any) -> Any: ...
 
 
-class AnthropicLike(Protocol):
-    messages: MessagesAPI
+class ChatAPI(Protocol):
+    completions: CompletionsAPI
+
+
+class GroqLike(Protocol):
+    chat: ChatAPI
 
 
 @dataclass
@@ -54,29 +57,53 @@ class VisionResult[T: BaseModel]:
     usage: Usage
 
 
+def strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """JSON schema for strict structured outputs: $refs inlined, every object closed
+    (additionalProperties false) with all properties required."""
+    schema = model.model_json_schema()
+    defs = schema.pop("$defs", {})
+
+    def resolve(node: Any) -> Any:
+        if isinstance(node, list):
+            return [resolve(n) for n in node]
+        if not isinstance(node, dict):
+            return node
+        if "$ref" in node:
+            return resolve(copy.deepcopy(defs[node["$ref"].rsplit("/", 1)[-1]]))
+        out = {k: resolve(v) for k, v in node.items()}
+        if out.get("type") == "object":
+            out["additionalProperties"] = False
+            out["required"] = list(out.get("properties", {}))
+        return out
+
+    return resolve(schema)
+
+
 def _usage_of(response: Any) -> Usage:
     u = response.usage
+    if u is None:
+        return Usage(api_calls=1)
+    details = getattr(u, "prompt_tokens_details", None)
     return Usage(
         api_calls=1,
-        input_tokens=u.input_tokens or 0,
-        output_tokens=u.output_tokens or 0,
-        cache_creation_input_tokens=getattr(u, "cache_creation_input_tokens", None) or 0,
-        cache_read_input_tokens=getattr(u, "cache_read_input_tokens", None) or 0,
+        input_tokens=u.prompt_tokens or 0,
+        output_tokens=u.completion_tokens or 0,
+        cached_input_tokens=(getattr(details, "cached_tokens", None) or 0) if details else 0,
     )
 
 
 class VisionClient:
-    def __init__(self, client: AnthropicLike, settings: Settings) -> None:
+    def __init__(self, client: GroqLike, settings: Settings) -> None:
         self._client = client
         self._settings = settings
         self._semaphore = asyncio.Semaphore(settings.vision_max_concurrency)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "VisionClient":
-        key = settings.anthropic_api_key
-        api_key = key.get_secret_value() if key else None  # None: SDK resolves env / profile
-        client = anthropic.AsyncAnthropic(
-            api_key=api_key,
+        if settings.groq_api_key is None or not settings.groq_api_key.get_secret_value():
+            raise VisionAuthError("No Groq API key is configured.")
+        client = groq.AsyncGroq(
+            api_key=settings.groq_api_key.get_secret_value(),
             max_retries=0,  # retries are handled by with_retries so the policy is in one place
             timeout=settings.vision_call_timeout_s,
         )
@@ -109,6 +136,38 @@ class VisionClient:
             label="read cover page",
         )
 
+    def _build_request[T: BaseModel](
+        self, *, system: str, instruction: str, jpeg: bytes, output_model: type[T],
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        s = self._settings
+        schema = strict_json_schema(output_model)
+        if s.vision_response_format == "json_schema":
+            response_format: dict[str, Any] = {
+                "type": "json_schema",
+                "json_schema": {"name": output_model.__name__, "strict": True, "schema": schema},
+            }
+        else:
+            response_format = {"type": "json_object"}
+            system = f"{system}\n\n{prompts.JSON_OBJECT_SUFFIX}{json.dumps(schema)}"
+        data_uri = "data:image/jpeg;base64," + base64.standard_b64encode(jpeg).decode("ascii")
+        return {
+            "model": s.vision_model,
+            "max_completion_tokens": max_tokens,
+            "reasoning_effort": s.vision_reasoning_effort,
+            "response_format": response_format,
+            "messages": [
+                {"role": "system", "content": system},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": data_uri}},
+                        {"type": "text", "text": instruction},
+                    ],
+                },
+            ],
+        }
+
     async def _call[T: BaseModel](
         self,
         *,
@@ -122,44 +181,19 @@ class VisionClient:
         s = self._settings
         usage = Usage()  # failed attempts are billed too, so count every response
         invalid_outputs = 0
-        schema = anthropic.transform_schema(output_model)
-        request = {
-            "model": s.transcribe_model,
-            "max_tokens": max_tokens,
-            "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": base64.standard_b64encode(jpeg).decode("ascii"),
-                            },
-                        },
-                        {"type": "text", "text": instruction},
-                    ],
-                }
-            ],
-            "output_config": {"format": {"type": "json_schema", "schema": schema}},
-        }
+        request = self._build_request(system=system, instruction=instruction, jpeg=jpeg,
+                                      output_model=output_model, max_tokens=max_tokens)
 
         async def attempt() -> T:
             nonlocal invalid_outputs
             async with self._semaphore:  # held only while the request is in flight
                 try:
                     response = await asyncio.wait_for(
-                        self._client.messages.create(**request), timeout=s.vision_call_timeout_s
+                        self._client.chat.completions.create(**request),
+                        timeout=s.vision_call_timeout_s,
                     )
-                except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
-                    raise VisionAuthError("The Anthropic API rejected the credentials.") from exc
-                except TypeError as exc:
-                    # The SDK raises a plain TypeError when no credentials are configured.
-                    if "authentication" not in str(exc).lower():
-                        raise
-                    raise VisionAuthError("No Anthropic API credentials are configured.") from exc
+                except (groq.AuthenticationError, groq.PermissionDeniedError) as exc:
+                    raise VisionAuthError("The Groq API rejected the API key.") from exc
             usage.add(_usage_of(response))
             try:
                 return _validate(response, output_model)
@@ -176,21 +210,23 @@ class VisionClient:
             label=label,
         )
         logger.info(
-            "%s ok: %d calls, %d in / %d out tokens, %d cache read",
+            "%s ok: %d calls, %d in / %d out tokens, %d cached",
             label, usage.api_calls, usage.input_tokens, usage.output_tokens,
-            usage.cache_read_input_tokens,
+            usage.cached_input_tokens,
         )
         return VisionResult(data=data, usage=usage)
 
 
 def _validate[T: BaseModel](response: Any, output_model: type[T]) -> T:
-    if response.stop_reason == "refusal":
-        raise OutputRefusedError("The model declined to process this page.")
-    if response.stop_reason == "max_tokens":
-        raise InvalidOutputError("Output was truncated at max_tokens.", retryable=True)
-    text = next((b.text for b in response.content if b.type == "text"), None)
-    if text is None:
-        raise InvalidOutputError("Response had no text block.", retryable=True)
+    if not response.choices:
+        raise InvalidOutputError("Response had no choices.", retryable=True)
+    choice = response.choices[0]
+    if choice.finish_reason == "length":
+        raise InvalidOutputError("Output was truncated at max_completion_tokens.",
+                                 retryable=True)
+    text = choice.message.content
+    if not text:
+        raise InvalidOutputError("Response had no content.", retryable=True)
     try:
         return output_model.model_validate_json(text)
     except ValidationError as exc:

@@ -6,7 +6,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-import anthropic
+import groq
 
 from backend.config import Settings, get_settings
 from backend.extract.ingest import load_script
@@ -25,7 +25,7 @@ from backend.extract.vision import VisionAuthError, VisionClient, VisionError, V
 logger = logging.getLogger(__name__)
 
 # Failures that mark one page as failed; anything else is a bug and propagates.
-PAGE_FAILURES = (VisionError, anthropic.APIError, TimeoutError)
+PAGE_FAILURES = (VisionError, groq.APIError, TimeoutError)
 
 
 def merge_pages(

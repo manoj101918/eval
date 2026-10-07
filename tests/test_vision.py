@@ -1,19 +1,21 @@
 import asyncio
 import base64
+import json
 import logging
 
-import anthropic
+import groq
 import pytest
+from pydantic import SecretStr
 
 from backend.config import Settings
-from backend.extract.schemas import PageTranscription
+from backend.extract.schemas import CoverPageInfo, PageTranscription
 from backend.extract.vision import (
     InvalidOutputError,
-    OutputRefusedError,
     VisionAuthError,
     VisionClient,
+    strict_json_schema,
 )
-from tests.fakes import FakeAnthropic, api_error, message, scripted
+from tests.fakes import FakeGroq, api_error, message, scripted, user_text
 
 JPEG = b"\xff\xd8fake-jpeg"
 SECRET_TEXT = "Photosynthesis converts light energy"
@@ -42,61 +44,81 @@ def settings(**overrides):
     return Settings(**(base | overrides))
 
 
+def test_strict_schema_is_closed_and_inlined():
+    schema = strict_json_schema(PageTranscription)
+    assert "$defs" not in json.dumps(schema) and "$ref" not in json.dumps(schema)
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == ["segments"]
+    segment = schema["properties"]["segments"]["items"]
+    assert segment["additionalProperties"] is False
+    assert set(segment["required"]) == set(segment["properties"]) == {
+        "question_number", "text", "has_diagram", "illegible", "illegible_notes"
+    }
+    assert strict_json_schema(CoverPageInfo)["required"] == ["roll_number"]
+
+
 async def test_transcribe_page_success():
-    fake = FakeAnthropic(scripted(message(PAGE, input_tokens=1500, output_tokens=300)))
+    fake = FakeGroq(scripted(message(PAGE, input_tokens=1500, output_tokens=300, cached=1000)))
     result = await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=2)
 
     assert isinstance(result.data, PageTranscription)
     assert result.data.segments[0].text == SECRET_TEXT
     assert result.usage.api_calls == 1
     assert result.usage.input_tokens == 1500
+    assert result.usage.cached_input_tokens == 1000
 
-    request = fake.messages.calls[0]
-    assert request["model"] == "claude-haiku-4-5"
-    assert request["system"][0]["cache_control"] == {"type": "ephemeral"}
-    image = request["messages"][0]["content"][0]
-    assert image["source"]["media_type"] == "image/jpeg"
-    assert base64.b64decode(image["source"]["data"]) == JPEG
-    assert "page 2 of the script" in request["messages"][0]["content"][1]["text"]
-    schema = request["output_config"]["format"]
-    assert schema["type"] == "json_schema"
-    assert "segments" in schema["schema"]["properties"]
+    request = fake.completions.calls[0]
+    assert request["model"] == "qwen/qwen3.8-27b"
+    assert request["reasoning_effort"] == "none"
+    assert request["max_completion_tokens"] == 8000
+    system, user = request["messages"]
+    assert system["role"] == "system" and "transcribe" in system["content"]
+    image = user["content"][0]["image_url"]["url"]
+    assert image.startswith("data:image/jpeg;base64,")
+    assert base64.b64decode(image.split(",", 1)[1]) == JPEG
+    assert "page 2 of the script" in user_text(request)
+    fmt = request["response_format"]
+    assert fmt["type"] == "json_schema"
+    assert fmt["json_schema"]["strict"] is True
+    assert fmt["json_schema"]["name"] == "PageTranscription"
+
+
+async def test_json_object_mode_puts_schema_in_prompt():
+    fake = FakeGroq(scripted(message(PAGE)))
+    client = VisionClient(fake, settings(vision_response_format="json_object"))
+    await client.transcribe_page(JPEG, page_number=1)
+    request = fake.completions.calls[0]
+    assert request["response_format"] == {"type": "json_object"}
+    assert '"segments"' in request["messages"][0]["content"]
 
 
 async def test_read_cover():
-    fake = FakeAnthropic(scripted(message({"roll_number": "21CS045"})))
+    fake = FakeGroq(scripted(message({"roll_number": "21CS045"})))
     result = await VisionClient(fake, settings()).read_cover(JPEG)
     assert result.data.roll_number == "21CS045"
-    assert fake.messages.calls[0]["max_tokens"] == 256
+    assert fake.completions.calls[0]["max_completion_tokens"] == 256
 
 
 async def test_rate_limit_then_success_counts_all_usage():
-    fake = FakeAnthropic(
+    fake = FakeGroq(
         scripted(
-            api_error(anthropic.RateLimitError, 429),
+            api_error(groq.RateLimitError, 429),
             message("not json", input_tokens=10, output_tokens=5),
             message(PAGE, input_tokens=100, output_tokens=50),
         )
     )
     result = await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=1)
-    assert len(fake.messages.calls) == 3
+    assert len(fake.completions.calls) == 3
     # The 429 returned no usage; the invalid response is billed and counted.
     assert result.usage.api_calls == 2
     assert result.usage.input_tokens == 110
 
 
 async def test_bad_request_not_retried():
-    fake = FakeAnthropic(scripted(api_error(anthropic.BadRequestError, 400)))
-    with pytest.raises(anthropic.BadRequestError):
+    fake = FakeGroq(scripted(api_error(groq.BadRequestError, 400)))
+    with pytest.raises(groq.BadRequestError):
         await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=1)
-    assert len(fake.messages.calls) == 1
-
-
-async def test_refusal_not_retried():
-    fake = FakeAnthropic(scripted(message("", stop_reason="refusal")))
-    with pytest.raises(OutputRefusedError):
-        await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=1)
-    assert len(fake.messages.calls) == 1
+    assert len(fake.completions.calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -104,25 +126,26 @@ async def test_refusal_not_retried():
     [
         message('{"segments": [{"text": "x"}]}'),  # schema violation
         message("{not json"),
-        message('{"segments": [', stop_reason="max_tokens"),  # truncated
+        message(None),  # no content
+        message('{"segments": [', finish_reason="length"),  # truncated
     ],
 )
 async def test_invalid_output_retried_once_then_fails(bad):
-    fake = FakeAnthropic(scripted(bad, bad, message(PAGE)))
+    fake = FakeGroq(scripted(bad, bad, message(PAGE)))
     with pytest.raises(InvalidOutputError):
         await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=1)
-    assert len(fake.messages.calls) == 2
+    assert len(fake.completions.calls) == 2
 
 
 async def test_invalid_output_then_valid_succeeds():
-    fake = FakeAnthropic(scripted(message("{not json"), message(PAGE)))
+    fake = FakeGroq(scripted(message("{not json"), message(PAGE)))
     result = await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=1)
     assert result.data.segments[0].question_number == "Q1"
 
 
 async def test_validation_error_does_not_leak_output():
     leaky = message('{"segments": [{"text": "' + SECRET_TEXT + '"}]}')
-    fake = FakeAnthropic(scripted(leaky, leaky))
+    fake = FakeGroq(scripted(leaky, leaky))
     with pytest.raises(InvalidOutputError) as exc:
         await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=1)
     assert SECRET_TEXT not in str(exc.value)
@@ -131,24 +154,24 @@ async def test_validation_error_does_not_leak_output():
 
 
 async def test_per_call_timeout_retries_then_fails():
-    fake = FakeAnthropic(lambda _r: message(PAGE), delay=1.0)
+    fake = FakeGroq(lambda _r: message(PAGE), delay=1.0)
     client = VisionClient(fake, settings(vision_call_timeout_s=0.02, vision_max_retries=2))
     with pytest.raises(TimeoutError):
         await client.transcribe_page(JPEG, page_number=1)
-    assert len(fake.messages.calls) == 3
+    assert len(fake.completions.calls) == 3
 
 
 async def test_concurrency_is_bounded():
-    fake = FakeAnthropic(lambda _r: message(PAGE), delay=0.02)
+    fake = FakeGroq(lambda _r: message(PAGE), delay=0.02)
     client = VisionClient(fake, settings(vision_max_concurrency=3))
     await asyncio.gather(*(client.transcribe_page(JPEG, page_number=i) for i in range(10)))
-    assert len(fake.messages.calls) == 10
-    assert fake.messages.peak_in_flight == 3
+    assert len(fake.completions.calls) == 10
+    assert fake.completions.peak_in_flight == 3
 
 
 async def test_logs_contain_no_student_text(caplog):
     caplog.set_level(logging.DEBUG)
-    fake = FakeAnthropic(scripted(message("{bad"), message(PAGE)))
+    fake = FakeGroq(scripted(message("{bad"), message(PAGE)))
     await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=4)
     assert "transcribe page 4" in caplog.text
     assert SECRET_TEXT not in caplog.text
@@ -156,20 +179,22 @@ async def test_logs_contain_no_student_text(caplog):
 
 @pytest.mark.parametrize(
     "error",
-    [
-        api_error(anthropic.AuthenticationError, 401),
-        api_error(anthropic.PermissionDeniedError, 403),
-        TypeError("Could not resolve authentication method. Expected one of api_key..."),
-    ],
+    [api_error(groq.AuthenticationError, 401), api_error(groq.PermissionDeniedError, 403)],
 )
-async def test_credential_errors_become_fatal_auth_error(error):
-    fake = FakeAnthropic(scripted(error))
+async def test_rejected_key_is_fatal_auth_error(error):
+    fake = FakeGroq(scripted(error))
     with pytest.raises(VisionAuthError):
         await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=1)
-    assert len(fake.messages.calls) == 1
+    assert len(fake.completions.calls) == 1
 
 
-async def test_unrelated_type_error_propagates():
-    fake = FakeAnthropic(scripted(TypeError("unexpected keyword")))
-    with pytest.raises(TypeError, match="unexpected keyword"):
-        await VisionClient(fake, settings()).transcribe_page(JPEG, page_number=1)
+@pytest.mark.parametrize("key", [None, ""])
+def test_missing_key_fails_at_construction(key):
+    s = settings(groq_api_key=SecretStr(key) if key is not None else None)
+    with pytest.raises(VisionAuthError):
+        VisionClient.from_settings(s)
+
+
+def test_from_settings_disables_sdk_retries():
+    client = VisionClient.from_settings(settings(groq_api_key=SecretStr("gsk_test")))
+    assert client._client.max_retries == 0

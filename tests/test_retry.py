@@ -1,4 +1,4 @@
-import anthropic
+import groq
 import pytest
 
 from backend.extract.retry import backoff_delay, is_retryable, retry_after, with_retries
@@ -41,12 +41,12 @@ def test_backoff_has_jitter():
     [
         (TimeoutError(), True),
         (connection_error(), True),
-        (api_error(anthropic.RateLimitError, 429), True),
-        (api_error(anthropic.InternalServerError, 500), True),
-        (api_error(anthropic.APIStatusError, 529), True),  # overloaded
-        (api_error(anthropic.BadRequestError, 400), False),
-        (api_error(anthropic.AuthenticationError, 401), False),
-        (api_error(anthropic.PermissionDeniedError, 403), False),
+        (api_error(groq.RateLimitError, 429), True),
+        (api_error(groq.InternalServerError, 500), True),
+        (api_error(groq.APIStatusError, 503), True),  # over capacity
+        (api_error(groq.BadRequestError, 400), False),
+        (api_error(groq.AuthenticationError, 401), False),
+        (api_error(groq.PermissionDeniedError, 403), False),
         (ValueError("bug"), False),
     ],
 )
@@ -55,15 +55,15 @@ def test_is_retryable(exc, expected):
 
 
 def test_retry_after_header():
-    assert retry_after(api_error(anthropic.RateLimitError, 429, {"retry-after": "7"})) == 7.0
-    assert retry_after(api_error(anthropic.RateLimitError, 429, {"retry-after": "999"})) == 60.0
-    assert retry_after(api_error(anthropic.RateLimitError, 429, {"retry-after": "soon"})) is None
-    assert retry_after(api_error(anthropic.RateLimitError, 429)) is None
+    assert retry_after(api_error(groq.RateLimitError, 429, {"retry-after": "7"})) == 7.0
+    assert retry_after(api_error(groq.RateLimitError, 429, {"retry-after": "999"})) == 60.0
+    assert retry_after(api_error(groq.RateLimitError, 429, {"retry-after": "soon"})) is None
+    assert retry_after(api_error(groq.RateLimitError, 429)) is None
     assert retry_after(TimeoutError()) is None
 
 
 async def test_succeeds_after_transient_errors():
-    fn, calls = flaky([connection_error(), api_error(anthropic.InternalServerError, 503)])
+    fn, calls = flaky([connection_error(), api_error(groq.InternalServerError, 503)])
     sleep = Recorder()
     assert await with_retries(fn, retries=4, base=1.0, cap=30, sleep=sleep) == "ok"
     assert calls["n"] == 3
@@ -78,15 +78,15 @@ async def test_timeout_is_retried():
 
 
 async def test_honours_retry_after():
-    fn, _ = flaky([api_error(anthropic.RateLimitError, 429, {"retry-after": "3"})])
+    fn, _ = flaky([api_error(groq.RateLimitError, 429, {"retry-after": "3"})])
     sleep = Recorder()
     await with_retries(fn, retries=2, base=1.0, cap=30, sleep=sleep)
     assert sleep.delays == [3.0]
 
 
 async def test_bad_request_not_retried():
-    fn, calls = flaky([api_error(anthropic.BadRequestError, 400)])
-    with pytest.raises(anthropic.BadRequestError):
+    fn, calls = flaky([api_error(groq.BadRequestError, 400)])
+    with pytest.raises(groq.BadRequestError):
         await with_retries(fn, retries=4, base=0, cap=0, sleep=Recorder())
     assert calls["n"] == 1
 
