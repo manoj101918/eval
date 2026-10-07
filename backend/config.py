@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     vision_backoff_max_s: float = Field(default=30.0, ge=0)
     vision_max_tokens: int = Field(default=2048, ge=256, le=16384)
 
+    # Grading (Groq text model). Free tier: 8,000 tokens/minute, 200,000/day for this model.
+    grading_model: str = "openai/gpt-oss-120b"
+    grading_reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    grading_response_format: Literal["json_schema", "json_object"] = "json_schema"
+    grading_temperature: float | None = Field(default=0.2, ge=0, le=2)  # steadier marks
+    grading_max_concurrency: int = Field(default=2, ge=1)
+    grading_tokens_per_minute: int = Field(default=8000, ge=0)  # 0 disables pacing
+    grading_max_tokens: int = Field(default=4096, ge=256)  # includes reasoning tokens
+
     # Image preprocessing
     image_max_px: int = Field(default=1500, ge=100)
     jpeg_quality: int = Field(default=80, ge=1, le=95)

@@ -72,7 +72,8 @@ def connection_error() -> groq.APIConnectionError:
 
 
 def user_text(request: dict[str, Any]) -> str:
-    return request["messages"][-1]["content"][-1]["text"]
+    content = request["messages"][-1]["content"]
+    return content if isinstance(content, str) else content[-1]["text"]  # text or vision
 
 
 def is_orientation_check(request: dict[str, Any]) -> bool:
