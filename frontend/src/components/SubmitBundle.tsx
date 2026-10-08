@@ -10,8 +10,9 @@ function fmt(n: number) {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
-export function SubmitBundleButton({ bundleId, code, canSubmit }: {
-  bundleId: number; code: string; canSubmit: boolean;
+/** Stays mounted after the bundle is submitted (only the button hides), so the result stays on screen. */
+export function SubmitBundleButton({ bundleId, code, canSubmit, submitted }: {
+  bundleId: number; code: string; canSubmit: boolean; submitted: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState<SubmitResult | null>(null);
@@ -25,10 +26,12 @@ export function SubmitBundleButton({ bundleId, code, canSubmit }: {
 
   return (
     <>
-      <Button disabled={!canSubmit} onClick={() => { setResult(null); setOpen(true); }}
-        title={canSubmit ? undefined : "Approve every script first"}>
-        Submit bundle
-      </Button>
+      {!submitted && (
+        <Button disabled={!canSubmit} onClick={() => { setResult(null); setOpen(true); }}
+          title={canSubmit ? undefined : "Approve every script first"}>
+          Submit bundle
+        </Button>
+      )}
       <Dialog open={open} title={`Submit bundle ${code}?`} onClose={() => setOpen(false)}>
         {result ? (
           <div className="space-y-3 text-sm">

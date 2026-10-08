@@ -37,9 +37,8 @@ export default function MyBundlesPage() {
               <Link href={`/bundles/${b.id}`} className="text-sm font-medium text-blue-800 hover:underline">
                 {b.status === "submitted" ? "View scripts" : "Review scripts →"}
               </Link>
-              {b.status !== "submitted" && (
-                <SubmitBundleButton bundleId={b.id} code={b.code} canSubmit={b.can_submit} />
-              )}
+              <SubmitBundleButton bundleId={b.id} code={b.code} canSubmit={b.can_submit}
+                submitted={b.status === "submitted"} />
             </div>
           </Card>
         ))}

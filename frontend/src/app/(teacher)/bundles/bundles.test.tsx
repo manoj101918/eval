@@ -35,8 +35,9 @@ describe("My bundles", () => {
 
   it("submits after showing a summary and reports the Excel export", async () => {
     const approved = [scriptItem({ status: "approved", ai_total: 4, final_total: 5, to_check: 0 })];
+    const list = { path: "/my/bundles", body: [bundle({ can_submit: true, approved: 1, total: 1 })] };
     const calls = mockFetch([
-      { path: "/my/bundles", body: [bundle({ can_submit: true, approved: 1, total: 1 })] },
+      list,
       { path: "/my/bundles/7", body: bundleScripts(approved) },
       { method: "POST", path: "/my/bundles/7/submit",
         body: { bundle: bundle({ status: "submitted" }), exam_completed: true, exported: true } },
@@ -47,9 +48,13 @@ describe("My bundles", () => {
     expect(await within(dialog).findByText("1 of 1 scripts approved")).toBeInTheDocument();
     expect(within(dialog).getByText("Total marks: 5 (AI proposed 4)")).toBeInTheDocument();
     expect(within(dialog).getByText("You changed the AI's marks on 1 script(s)")).toBeInTheDocument();
+    list.body = [bundle({ status: "submitted", approved: 1, total: 1 })]; // what the refetch after submit returns
     await userEvent.click(within(dialog).getByRole("button", { name: "Submit" }));
     expect(await within(dialog).findByText(/written to the Excel sheet/)).toBeInTheDocument();
     expect(calls.some((c) => c.method === "POST" && c.path === "/api/my/bundles/7/submit")).toBe(true);
+    // the refreshed list hides the button, but the result stays until the teacher closes it
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Submit bundle" })).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog")).toHaveTextContent(/written to the Excel sheet/);
   });
 
   it("shows why submitting failed", async () => {

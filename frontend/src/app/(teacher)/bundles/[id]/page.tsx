@@ -34,7 +34,8 @@ export default function BundlePage() {
         </div>
         <div className="flex items-center gap-3">
           <StatusBadge status={b.status} />
-          {b.status !== "submitted" && <SubmitBundleButton bundleId={b.id} code={b.code} canSubmit={b.can_submit} />}
+          <SubmitBundleButton bundleId={b.id} code={b.code} canSubmit={b.can_submit}
+            submitted={b.status === "submitted"} />
         </div>
       </div>
 
