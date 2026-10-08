@@ -1,6 +1,7 @@
 """Application settings, loaded from environment variables / .env."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr
@@ -65,6 +66,21 @@ class Settings(BaseSettings):
     # Answer booklet layout
     has_cover_page: bool = True
     roll_number_pattern: str = r"[A-Z0-9]{5,15}"
+
+    # Web app (phase 3)
+    database_url: str = "sqlite+aiosqlite:///./data/app.db"
+    storage_dir: Path = Path("data/storage")  # uploaded PDFs and page images (student data)
+    export_dir: Path = Path("data/exports")  # generated mark sheets
+    # Optional college master workbook: each exam's sheet is added/replaced in it.
+    excel_master_path: Path | None = None
+    job_runner: Literal["inline", "arq"] = "inline"  # arq + Redis in deployment
+    redis_url: str = "redis://localhost:6379"
+    session_ttl_hours: int = Field(default=12, ge=1)
+    cookie_secure: bool = False  # set true when served over HTTPS
+    login_max_failures: int = Field(default=5, ge=1)
+    login_lock_minutes: int = Field(default=15, ge=1)
+    max_upload_mb: int = Field(default=50, ge=1)
+    page_image_max_px: int = Field(default=1800, ge=500)  # page images for the review screen
 
 
 @lru_cache
