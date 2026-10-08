@@ -16,6 +16,9 @@ node_modules/
 # Real answer scripts contain student data - never commit them
 samples/*
 !samples/.gitkeep
+# App database, uploaded scans, page images and exported mark sheets (student data)
+data/
+*.db
 
 # OS / editor
 .DS_Store
