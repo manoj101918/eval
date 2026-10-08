@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -28,6 +28,7 @@ from backend.app.storage import (
     script_pdf,
 )
 from backend.grading.scheme import MarkingScheme, SchemeError, load_scheme
+from backend.grading.template import write_template
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -266,6 +267,22 @@ async def create_exam(
     await record(db, admin.id, "create_exam", "exam", exam.id)
     await db.commit()
     return await exam_detail(exam.id, admin, db)
+
+
+@router.get("/scheme-template")
+async def scheme_template(_: AdminUser) -> Response:
+    """Blank marking-scheme workbook with examples and instructions."""
+    def build() -> bytes:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "marking_scheme_template.xlsx"
+            write_template(path)
+            return path.read_bytes()
+
+    return Response(
+        await asyncio.to_thread(build),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="marking_scheme_template.xlsx"'},
+    )
 
 
 @router.get("/exams")

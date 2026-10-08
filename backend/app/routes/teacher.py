@@ -5,6 +5,7 @@ reported as not found."""
 import asyncio
 import json
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import FileResponse
@@ -290,9 +291,14 @@ async def get_script(script_id: int, user: TeacherUser, db: DbSession) -> Script
 
 @router.get("/scripts/{script_id}/pages/{page}")
 async def get_page(script_id: int, page: int, user: TeacherUser, db: DbSession,
-                   settings: AppSettings) -> FileResponse:
+                   settings: AppSettings,
+                   size: Literal["full", "thumb"] = "full") -> FileResponse:
     script = await own_script(db, script_id, user)
     path = page_image(settings.storage_dir, script.id, page)
+    if size == "thumb":
+        thumb = page_image(settings.storage_dir, script.id, page, thumb=True)
+        if await asyncio.to_thread(thumb.is_file):  # older scripts have no thumbnails
+            path = thumb
     if not 1 <= page <= script.page_count or not await asyncio.to_thread(path.is_file):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Page not found.")
     return FileResponse(path, media_type="image/jpeg",

@@ -27,8 +27,9 @@ def script_pdf(storage: Path, script_id: int) -> Path:
     return script_dir(storage, script_id) / "original.pdf"
 
 
-def page_image(storage: Path, script_id: int, page: int) -> Path:
-    return script_dir(storage, script_id) / "pages" / f"page_{page}.jpg"
+def page_image(storage: Path, script_id: int, page: int, *, thumb: bool = False) -> Path:
+    name = f"thumb_{page}.jpg" if thumb else f"page_{page}.jpg"
+    return script_dir(storage, script_id) / "pages" / name
 
 
 def exam_scheme(storage: Path, exam_id: int) -> Path:

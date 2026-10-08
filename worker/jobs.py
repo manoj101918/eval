@@ -29,14 +29,20 @@ from worker.runner import Handler
 logger = logging.getLogger(__name__)
 
 
+THUMB_PX = 240
+
+
 def save_page_images(settings: Settings, script_id: int, pdf: Path, rotation: int) -> int:
-    """Upright, review-size JPEGs of every page; returns the page count."""
+    """Upright, review-size JPEGs of every page plus small thumbnails for the page strip;
+    returns the page count."""
     pages = load_pages([pdf], dpi=settings.pdf_render_dpi)
     for raw in pages:
         image = downscale(rotate(raw.image, rotation), settings.page_image_max_px)
         dest = page_image(settings.storage_dir, script_id, raw.index + 1)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(to_jpeg(image, 80))
+        thumb = page_image(settings.storage_dir, script_id, raw.index + 1, thumb=True)
+        thumb.write_bytes(to_jpeg(downscale(image, THUMB_PX), 70))
     return len(pages)
 
 
