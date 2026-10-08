@@ -128,3 +128,7 @@ class FakeGroq:
         delay_fn = delay if callable(delay) else (lambda _r: delay)
         self.completions = FakeCompletions(handler, delay_fn)
         self.chat = _Chat(self.completions)
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True

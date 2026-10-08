@@ -39,6 +39,9 @@ class InlineRunner:
         if self._task is not None:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
+        close = getattr(self._handler, "aclose", None)  # e.g. the AI clients' sessions
+        if close is not None:
+            await close()
 
     async def join(self) -> None:
         """Wait until every queued job has finished (tests)."""

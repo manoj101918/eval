@@ -39,12 +39,21 @@ def settings(tmp_path):
                         vision_backoff_base_s=0, vision_backoff_max_s=0, vision_max_retries=0)
 
 
+CREATED: list[FakeGroq] = []
+
+
+def tracked(fake: FakeGroq) -> FakeGroq:
+    CREATED.append(fake)
+    return fake
+
+
 @pytest.fixture
 def app_factories():
+    CREATED.clear()
     return {
-        "extraction_factory": lambda s: VisionClient(FakeGroq(lambda r: BEHAVIOUR["vision"](r)),
-                                                     s),
-        "grader_factory": lambda s: Grader(FakeGroq(lambda r: BEHAVIOUR["grade"](r)), s),
+        "extraction_factory": lambda s: VisionClient(
+            tracked(FakeGroq(lambda r: BEHAVIOUR["vision"](r))), s),
+        "grader_factory": lambda s: Grader(tracked(FakeGroq(lambda r: BEHAVIOUR["grade"](r))), s),
     }
 
 
@@ -121,6 +130,14 @@ async def test_retry_after_failure_grades_the_script(app, client):
     async with app.state.sessionmaker() as db:
         retried = await db.scalar(select(Script).where(Script.id == script.id))
     assert retried.status == "graded"
+
+
+async def test_runner_stop_closes_ai_clients(app, client):
+    await upload_one(app, client)
+    fakes = CREATED.copy()
+    assert len(fakes) == 2  # one transcription client and one grader for all jobs
+    await app.state.runner.stop()
+    assert all(f.closed for f in fakes)
 
 
 async def test_job_logs_hold_no_student_data(app, client, caplog):

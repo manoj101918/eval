@@ -59,6 +59,13 @@ def make_handler(state: Any) -> Handler:
     async def handler(script_id: int) -> None:
         await process_script(state, script_id, vision, grader)
 
+    async def aclose() -> None:
+        """Close the AI clients' network sessions (called when the runner stops)."""
+        for client in clients.values():
+            await client.aclose()
+        clients.clear()
+
+    handler.aclose = aclose  # type: ignore[attr-defined]
     return handler
 
 
