@@ -99,6 +99,7 @@ class ScriptOut(BaseModel):
     exam: ExamInfo
     status: str
     editable: bool
+    bundle_submitted: bool  # once submitted, nothing can change until the exam cell reopens it
     roll_number: str | None
     roll_number_source: str | None
     page_count: int
@@ -218,6 +219,7 @@ def script_out(script: Script) -> ScriptOut:
         id=script.id, bundle_id=script.bundle_id, exam=exam_info(script.bundle.exam),
         status=script.status,
         editable=script.status == "graded" and script.bundle.submitted_at is None,
+        bundle_submitted=script.bundle.submitted_at is not None,
         roll_number=script.roll_number, roll_number_source=script.roll_number_source,
         page_count=script.page_count, failed_pages=failed_pages,
         questions=[question_out(q, counted) for q in script.questions],

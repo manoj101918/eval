@@ -29,7 +29,7 @@ export function question(over: Partial<QuestionOut> = {}): QuestionOut {
 
 export function script(over: Partial<ScriptOut> = {}): ScriptOut {
   return {
-    id: 11, bundle_id: 7, exam, status: "graded", editable: true, roll_number: "21CS045",
+    id: 11, bundle_id: 7, exam, status: "graded", editable: true, bundle_submitted: false, roll_number: "21CS045",
     roll_number_source: "qr", page_count: 3, failed_pages: [],
     questions: [
       question({ id: 100, question: "1", qtype: "mcq", max_marks: 1, ai_marks: 1, final_marks: 1,

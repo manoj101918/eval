@@ -211,6 +211,7 @@ async def test_submit_last_bundle_writes_excel(app, client, settings):
         assert result["bundle"]["status"] == "submitted"
         assert result["exam_completed"] is True and result["exported"] is True
         s = await first_script(asha, ids["B1"])
+        assert s["bundle_submitted"] is True and s["editable"] is False
         r = await asha.patch(f"/api/my/scripts/{s['id']}/questions/{q_of(s, '5')['id']}",
                              json={"final_marks": 1})
         assert r.status_code == 409

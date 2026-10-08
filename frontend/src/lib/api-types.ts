@@ -795,6 +795,8 @@ export interface components {
             status: string;
             /** Editable */
             editable: boolean;
+            /** Bundle Submitted */
+            bundle_submitted: boolean;
             /** Roll Number */
             roll_number: string | null;
             /** Roll Number Source */
