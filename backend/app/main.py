@@ -16,6 +16,7 @@ from backend.app.db import Base, make_engine, make_sessionmaker
 from backend.app.models import Script
 from backend.app.routes import admin as admin_routes
 from backend.app.routes import auth as auth_routes
+from backend.app.routes import teacher as teacher_routes
 from backend.config import Settings, get_settings
 from backend.logging_setup import cap_library_loggers
 from worker.runner import Handler, InlineRunner
@@ -89,6 +90,7 @@ def create_app(
 
     app.include_router(auth_routes.router)
     app.include_router(admin_routes.router)
+    app.include_router(teacher_routes.router)
     return app
 
 

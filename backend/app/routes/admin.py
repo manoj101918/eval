@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -13,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from backend.app import auth
 from backend.app.audit import record
 from backend.app.deps import AdminUser, AppSettings, DbSession
+from backend.app.exporting import run_export
 from backend.app.models import Bundle, Exam, Script, User
 from backend.app.queries import load_bundle, load_exam
 from backend.app.status import bundle_status, exam_status, script_counts
@@ -372,6 +374,28 @@ async def retry_failed(bundle_id: int, request: Request, admin: AdminUser,
     for script in failed:
         request.app.state.runner.enqueue(script.id)
     return bundle_summary(await load_bundle(db, bundle.id))
+
+
+@router.post("/exams/{exam_id}/export")
+async def export_marks(exam_id: int, admin: AdminUser, db: DbSession,
+                       settings: AppSettings) -> ExamDetail:
+    """Write (or rewrite) the exam's mark sheet. Only allowed once every bundle is submitted
+    and every script approved."""
+    problems = await run_export(db, exam_id, settings, admin.id)
+    if problems:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            {"message": "The marks cannot be exported yet.", "problems": problems})
+    return await exam_detail(exam_id, admin, db)
+
+
+@router.get("/exams/{exam_id}/export/file")
+async def download_export(exam_id: int, _: AdminUser, db: DbSession) -> FileResponse:
+    exam = await load_exam(db, exam_id)
+    path = Path(exam.export_path) if exam.export_path else None
+    if exam.exported_at is None or path is None or not await asyncio.to_thread(path.is_file):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No exported mark sheet for this exam.")
+    return FileResponse(path, filename=path.name, media_type=(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
 
 
 @router.post("/bundles/{bundle_id}/reopen")

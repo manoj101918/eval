@@ -1,4 +1,8 @@
-"""Loading helpers with the relationships the views need (async needs eager loading)."""
+"""Loading helpers with the relationships the views need (async needs eager loading).
+
+Views built after a change reuse the objects the request modified (the session keeps
+them, expire_on_commit=False). Change relationships by assigning objects, not ids,
+so loaded relationships never go stale."""
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -14,6 +18,19 @@ async def load_exam(db: AsyncSession, exam_id: int) -> Exam:
             selectinload(Exam.bundles).selectinload(Bundle.scripts),
             selectinload(Exam.bundles).selectinload(Bundle.teacher),
         ))
+    if exam is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Exam not found.")
+    return exam
+
+
+async def load_exam_full(db: AsyncSession, exam_id: int) -> Exam:
+    """Exam with every bundle, script and question mark (for the export)."""
+    exam = await db.scalar(
+        select(Exam).where(Exam.id == exam_id).options(
+            selectinload(Exam.bundles).selectinload(Bundle.scripts)
+            .selectinload(Script.questions),
+            selectinload(Exam.bundles).selectinload(Bundle.teacher),
+        ).execution_options(populate_existing=True))
     if exam is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Exam not found.")
     return exam
