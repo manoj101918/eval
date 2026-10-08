@@ -36,10 +36,25 @@ def settings(tmp_path):
     return app_settings(tmp_path)
 
 
+def recording_jobs(app):
+    """Job handler that only records which scripts were queued."""
+    app.state.jobs_seen = []
+
+    async def handler(script_id: int) -> None:
+        app.state.jobs_seen.append(script_id)
+
+    return handler
+
+
 @pytest.fixture
-async def app(settings, request):
-    factories = getattr(request, "param", {}) or {}
-    application = create_app(settings, **factories)
+def app_factories():
+    """Override in a test module to inject AI client factories or a job handler."""
+    return {"job_handler_factory": recording_jobs}
+
+
+@pytest.fixture
+async def app(settings, app_factories):
+    application = create_app(settings, **app_factories)
     async with application.router.lifespan_context(application):
         yield application
 

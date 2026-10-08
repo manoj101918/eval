@@ -19,6 +19,7 @@ from backend.extract.ingest import IngestError
 from backend.extract.pipeline import extract_script
 from backend.extract.schemas import ExtractionResult
 from backend.extract.vision import VisionAuthError
+from backend.logging_setup import cap_library_loggers
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,6 +58,7 @@ def main(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )
+    cap_library_loggers()  # library DEBUG output can carry student data
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # transcriptions may hold non-ASCII text
 

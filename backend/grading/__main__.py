@@ -27,6 +27,7 @@ from backend.grading.grader import Grader
 from backend.grading.schemas import GradingResult
 from backend.grading.scheme import MarkingScheme, SchemeError, load_scheme
 from backend.llm.groq_chat import VisionAuthError
+from backend.logging_setup import cap_library_loggers
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,6 +79,7 @@ def main(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )
+    cap_library_loggers()  # library DEBUG output can carry student data
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     settings = settings or get_settings()
