@@ -19,9 +19,15 @@ class Base(DeclarativeBase):
 
 def make_engine(url: str) -> AsyncEngine:
     db_url = make_url(url)
-    if db_url.get_backend_name() == "sqlite" and db_url.database not in (None, "", ":memory:"):
-        Path(db_url.database).parent.mkdir(parents=True, exist_ok=True)
-    engine = create_async_engine(url)
+    if db_url.get_backend_name() == "sqlite":
+        if db_url.database not in (None, "", ":memory:"):
+            Path(db_url.database).parent.mkdir(parents=True, exist_ok=True)
+        engine = create_async_engine(url)
+    else:
+        # PostgreSQL (Supabase). pre_ping drops connections the pooler has closed;
+        # no statement cache, so Supabase's transaction pooler (port 6543) also works.
+        engine = create_async_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5,
+                                     connect_args={"statement_cache_size": 0})
     if url.startswith("sqlite"):
         # SQLite ignores foreign keys unless asked, per connection.
         @event.listens_for(engine.sync_engine, "connect")

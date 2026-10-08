@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     login_lock_minutes: int = Field(default=15, ge=1)
     max_upload_mb: int = Field(default=50, ge=1)
     page_image_max_px: int = Field(default=1800, ge=500)  # page images for the review screen
+
+    @field_validator("database_url")
+    @classmethod
+    def _async_driver(cls, url: str) -> str:
+        """Accept the plain URL Supabase shows (postgresql://...) and use the async driver."""
+        for prefix in ("postgresql://", "postgres://"):
+            if url.startswith(prefix):
+                return "postgresql+asyncpg://" + url[len(prefix):]
+        return url
 
 
 @lru_cache

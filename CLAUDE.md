@@ -2,7 +2,7 @@
 Grades handwritten college answer scripts (weekly tests, mids, semester exams) with a vision LLM. A teacher reviews every mark before it is final, and approved marks sync to the college Excel sheet.
 
 ## Stack
-- Backend: Python 3.12, FastAPI, SQLAlchemy, Alembic, PostgreSQL
+- Backend: Python 3.12, FastAPI, SQLAlchemy, Alembic, PostgreSQL on Supabase (project `eval`, `izldfkejfljfevbgfdaq`, ap-south-1; tables locked from the public REST API by migration 0002); SQLite for tests/local dev
 - Jobs: Redis + arq for background processing
 - AI / OCR: Azure Document Intelligence `prebuilt-read` for transcription (default); Groq `qwen/qwen3.8-27b` vision model selectable with `TRANSCRIBE_PROVIDER=groq`; grading model chosen in Phase 2
 - Frontend: Next.js + TypeScript + Tailwind
